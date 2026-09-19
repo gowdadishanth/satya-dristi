@@ -74,6 +74,10 @@ def test_p0_user_a_cannot_access_user_b_analysis():
         res = client.get(f"/api/v1/analyses/{b_aid}")
         assert res.status_code == 403, f"Expected 403 Forbidden, got {res.status_code}"
 
+        # Analysis status
+        res_st = client.get(f"/api/v1/analyses/{b_aid}/status")
+        assert res_st.status_code == 403, f"Expected 403 Forbidden, got {res_st.status_code}"
+
         # Analysis visual evidence
         res_ev = client.get(f"/api/v1/analyses/{b_aid}/evidence")
         assert res_ev.status_code == 403, f"Expected 403 Forbidden, got {res_ev.status_code}"

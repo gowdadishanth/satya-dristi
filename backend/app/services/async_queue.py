@@ -46,6 +46,16 @@ class AnalysisJobManager:
             }
         return None
 
+    def get_job_owner(self, analysis_id: str) -> Optional[str]:
+        """Returns the owner UID of an active or completed job."""
+        job = self._jobs.get(analysis_id)
+        if job and "uid" in job:
+            return job["uid"]
+        doc = db.get_analysis(analysis_id)
+        if doc and "uid" in doc:
+            return doc["uid"]
+        return None
+
     async def start_analysis_job(
         self,
         analysis_id: str,

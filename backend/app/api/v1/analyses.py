@@ -106,6 +106,13 @@ async def get_analysis_status(
     """
     Polls real-time progress and observable execution stage of an asynchronous analysis.
     """
+    owner_uid = job_manager.get_job_owner(analysis_id)
+    if not owner_uid:
+        raise NotFoundError(f"Analysis '{analysis_id}' not found.")
+        
+    if not current_user.get("is_dev") and owner_uid != current_user["uid"]:
+        raise ForbiddenError("You are not authorized to view this analysis status.")
+
     status_info = job_manager.get_job_status(analysis_id)
     if not status_info:
         raise NotFoundError(f"Analysis '{analysis_id}' not found.")
