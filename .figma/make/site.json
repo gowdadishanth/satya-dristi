@@ -1,0 +1,10 @@
+{
+  "description": "Streamlines user tasks with an intuitive interface designed to enhance productivity and simplify complex workflows for professionals.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

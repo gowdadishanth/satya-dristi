@@ -1,0 +1,194 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-panel: var(--panel);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-err: var(--err);
+}
+
+:root {
+  /* Cobalt sky — #0047AB cobalt · #000080 navy · #82C8E5 sky · #6D8196 slate */
+  --background: #eef3fb;
+  --foreground: #000080;
+  --card: #ffffff;
+  --card-foreground: #000080;
+  --panel: #ffffff;
+  --primary: #0047ab;
+  --primary-foreground: #ffffff;
+  --secondary: #82c8e5;
+  --secondary-foreground: #000080;
+  --accent: #0047ab;
+  --accent-foreground: #ffffff;
+  --muted: #d2e4f5;
+  --muted-foreground: #6d8196;
+  --border: #b8d0e8;
+  --ring: #0047ab;
+  --ok: #1d7a47;
+  --warn: #b07a18;
+  --err: #be3b30;
+  --shadow-color: 220 62% 24%;
+}
+
+.dark {
+  /* Cobalt sky dark — navy depths, sky highlights */
+  --background: #06091a;
+  --foreground: #cde6f6;
+  --card: #0c1430;
+  --card-foreground: #cde6f6;
+  --panel: #0c1430;
+  --primary: #82c8e5;
+  --primary-foreground: #000080;
+  --secondary: #162050;
+  --secondary-foreground: #cde6f6;
+  --accent: #82c8e5;
+  --accent-foreground: #000080;
+  --muted: #0f1c3e;
+  --muted-foreground: #6d8196;
+  --border: #1a2e5c;
+  --ring: #82c8e5;
+  --ok: #3aaa6e;
+  --warn: #d49a3e;
+  --err: #d45858;
+  --shadow-color: 226 62% 4%;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'zero';
+}
+
+html[data-density='compact'] body {
+  font-size: 14.5px;
+}
+html[data-density='compact'] .panel {
+  border-radius: 6px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+/* ---- Scrollbar: hidden until scroll ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover,
+*:focus-within {
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+  background-clip: padding-box;
+}
+
+/* =========================================================
+   PANEL SYSTEM — two treatments only
+   ========================================================= */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+/* --- Default: flat editorial surfaces --- */
+.theme-default .panel {
+  box-shadow: none;
+}
+.theme-default .panel-raised {
+  box-shadow: 0 10px 30px -18px hsl(var(--shadow-color) / 0.35);
+}
+
+/* A quiet, borderless block used to avoid the "everything is a card" look */
+.block-flat {
+  background: transparent;
+  border: none;
+}
+
+/* --- NeoMorphism: soft raised surfaces --- */
+.theme-neo .panel {
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background: var(--background);
+  box-shadow:
+    5px 5px 12px hsl(var(--shadow-color) / 0.16),
+    -5px -5px 12px color-mix(in srgb, white 75%, transparent);
+}
+.dark.theme-neo .panel {
+  box-shadow:
+    5px 5px 12px hsl(var(--shadow-color) / 0.6),
+    -5px -5px 12px color-mix(in srgb, white 4%, transparent);
+}
+.theme-neo .panel-inset {
+  box-shadow:
+    inset 3px 3px 7px hsl(var(--shadow-color) / 0.16),
+    inset -3px -3px 7px color-mix(in srgb, white 70%, transparent);
+}
+
+/* focus ring */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-up {
+  animation: fadeUp 0.3s ease both;
+}
