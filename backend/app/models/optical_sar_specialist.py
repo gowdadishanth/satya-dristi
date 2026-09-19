@@ -1,3 +1,4 @@
+import uuid
 import numpy as np
 from PIL import Image
 from typing import Dict, Any, Optional
@@ -15,7 +16,8 @@ class OpticalSARSpecialist:
         self,
         optical_path: str,
         sar_path: str,
-        query: str
+        query: str,
+        analysis_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Multimodal joint analysis of Sentinel-2 optical reflectance and Sentinel-1 SAR backscatter.
@@ -67,8 +69,15 @@ class OpticalSARSpecialist:
         # Highlight confirmed water with deep azure tint
         fused_vis[confirmed_water] = fused_vis[confirmed_water] * 0.4 + np.array([50, 110, 180]) * 0.6
 
-        fused_filename = f"fused_{Path(optical_path).stem}_{Path(sar_path).stem}.png"
-        fused_path = settings.EVIDENCE_DIR / fused_filename
+        if analysis_id:
+            analysis_evidence_dir = settings.EVIDENCE_DIR / analysis_id
+            analysis_evidence_dir.mkdir(parents=True, exist_ok=True)
+            fused_filename = "fused_optical_sar.png"
+            fused_path = analysis_evidence_dir / fused_filename
+        else:
+            fused_filename = f"fused_{Path(optical_path).stem}_{Path(sar_path).stem}_{uuid.uuid4().hex[:8]}.png"
+            fused_path = settings.EVIDENCE_DIR / fused_filename
+
         Image.fromarray(np.clip(fused_vis, 0, 255).astype(np.uint8)).save(fused_path, format="PNG")
 
         # 5. Formulate multimodal answer

@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import sqlite3
 import logging
 from typing import Dict, Any, List, Optional
@@ -174,6 +175,16 @@ class DatabaseService:
                 logger.error("Firestore delete_analysis error: %s", e)
                 return False
         _local_store.delete_document("analyses", analysis_id)
+        # Clean up scoped evidence directory and uploaded files
+        try:
+            evidence_dir = settings.EVIDENCE_DIR / analysis_id
+            if evidence_dir.is_dir():
+                shutil.rmtree(evidence_dir, ignore_errors=True)
+            uploads_dir = settings.UPLOADS_DIR / analysis_id
+            if uploads_dir.is_dir():
+                shutil.rmtree(uploads_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning("Artifact cleanup error during delete_analysis: %s", e)
         return True
 
     @staticmethod

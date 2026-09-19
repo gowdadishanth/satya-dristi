@@ -50,10 +50,22 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   const [secondaryScene, setSecondaryScene] = useState<Scene | null>(null);
   const [aoi, setAoi] = useState<AOIPreview | null>(null);
 
-  // Interactive UI State
   const [searching, setSearching] = useState(false);
   const [drawingAoi, setDrawingAoi] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Request sequence tracking to discard stale concurrent preview requests
+  const aoiRequestIdRef = useRef<number>(0);
+
+  // Clear scene selections whenever active analysis mode changes (Single vs Temporal vs Fusion)
+  useEffect(() => {
+    setSelectedScene(null);
+    setSecondaryScene(null);
+    setScenes([]);
+    if (footprintsLayerRef.current) {
+      footprintsLayerRef.current.clearLayers();
+    }
+  }, [mode]);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -125,6 +137,17 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   const createAoiFromBounds = async (bounds: L.LatLngBounds) => {
     if (!mapRef.current) return;
 
+    // CR-GEO-02: Increment request sequence ID to discard stale concurrent preview responses
+    const currentReqId = ++aoiRequestIdRef.current;
+
+    // CR-GEO-01: Clear stale scene results and selections immediately when new AOI is initiated
+    setSelectedScene(null);
+    setSecondaryScene(null);
+    setScenes([]);
+    if (footprintsLayerRef.current) {
+      footprintsLayerRef.current.clearLayers();
+    }
+
     if (aoiLayerRef.current) {
       mapRef.current.removeLayer(aoiLayerRef.current);
     }
@@ -148,9 +171,17 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
 
     try {
       const preview = await api.earth.previewAOI({ bbox });
+      // Discard stale response if a newer request was dispatched
+      if (currentReqId !== aoiRequestIdRef.current) {
+        return;
+      }
       setAoi(preview);
       setErrorMsg(null);
     } catch (err: any) {
+      // Discard stale error if a newer request was dispatched
+      if (currentReqId !== aoiRequestIdRef.current) {
+        return;
+      }
       setAoi(null);
       setErrorMsg(err?.message || "Invalid AOI bounds or AOI validation failed.");
       if (aoiLayerRef.current && mapRef.current) {

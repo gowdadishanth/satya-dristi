@@ -29,7 +29,7 @@ export function Panel({
 /* ---------------- Button ---------------- */
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "accent" | "ghost" | "outline";
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
   icon?: ReactNode;
 };
 export function Button({
@@ -42,7 +42,12 @@ export function Button({
 }: BtnProps) {
   const base =
     "inline-flex items-center justify-center gap-2 font-medium rounded-md transition-colors focus-ring disabled:opacity-45 disabled:pointer-events-none select-none whitespace-nowrap";
-  const sizes = size === "sm" ? "text-[12.5px] px-2.5 h-8" : "text-sm px-4 h-10";
+  const sizes =
+    size === "sm"
+      ? "text-[12.5px] px-2.5 h-8"
+      : size === "lg"
+      ? "text-[14px] px-5 h-11"
+      : "text-sm px-4 h-10";
   const variants: Record<string, string> = {
     primary: "bg-primary text-primary-foreground hover:opacity-90",
     accent: "bg-accent text-accent-foreground hover:opacity-90",

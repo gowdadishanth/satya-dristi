@@ -1,3 +1,4 @@
+import uuid
 import cv2
 import numpy as np
 from PIL import Image
@@ -17,7 +18,8 @@ class ChangeSpecialist:
         before_image_path: str,
         after_image_path: str,
         query: str,
-        geo_bbox: Optional[List[float]] = None
+        geo_bbox: Optional[List[float]] = None,
+        analysis_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Performs genuine bi-temporal change detection between two real observations.
@@ -84,8 +86,15 @@ class ChangeSpecialist:
         other_change = (cleaned_change > 0) & ~new_built_mask & ~new_water_mask
         overlay[other_change] = [194, 203, 211, 120]
 
-        evidence_filename = f"change_map_{Path(after_image_path).stem}.png"
-        evidence_path = settings.EVIDENCE_DIR / evidence_filename
+        if analysis_id:
+            analysis_evidence_dir = settings.EVIDENCE_DIR / analysis_id
+            analysis_evidence_dir.mkdir(parents=True, exist_ok=True)
+            evidence_filename = "change_map.png"
+            evidence_path = analysis_evidence_dir / evidence_filename
+        else:
+            evidence_filename = f"change_map_{Path(after_image_path).stem}_{uuid.uuid4().hex[:8]}.png"
+            evidence_path = settings.EVIDENCE_DIR / evidence_filename
+
         Image.fromarray(overlay, mode="RGBA").save(evidence_path, format="PNG")
 
         # 5. Formulate natural-language answer grounded in observation

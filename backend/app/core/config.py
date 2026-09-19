@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     MAX_VRAM_USAGE_MB: int = 3500
     PREFER_GPU: bool = True
 
+    # Upload limits & streaming configuration
+    MAX_UPLOAD_BYTES: int = 150 * 1024 * 1024       # 150 MB max per file
+    MAX_TOTAL_UPLOAD_BYTES: int = 300 * 1024 * 1024  # 300 MB max total per request
+    UPLOAD_CHUNK_BYTES: int = 1024 * 1024           # 1 MB chunk stream buffer
+
     model_config = {
         "env_file": ".env",
         "extra": "ignore"

@@ -62,3 +62,11 @@ class ForbiddenError(SatyaDristiError):
 class NotFoundError(SatyaDristiError):
     def __init__(self, message: str = "The requested resource was not found.", details: dict = None):
         super().__init__("NOT_FOUND", message, status.HTTP_404_NOT_FOUND, details)
+
+class PayloadTooLargeError(SatyaDristiError):
+    def __init__(self, message: str = "Uploaded file exceeds maximum allowed size.", details: dict = None):
+        super().__init__("PAYLOAD_TOO_LARGE", message, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, details)
+
+class ValidationError(SatyaDristiError):
+    def __init__(self, message: str = "Validation failed for request parameters or payload.", details: dict = None):
+        super().__init__("VALIDATION_ERROR", message, status.HTTP_422_UNPROCESSABLE_ENTITY, details)

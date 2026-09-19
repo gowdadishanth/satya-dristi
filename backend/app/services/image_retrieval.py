@@ -12,8 +12,10 @@ import rasterio
 from rasterio.windows import from_bounds
 from pyproj import Transformer
 
+from fastapi import UploadFile
+
 from app.core.config import settings
-from app.core.errors import ImageRetrievalFailedError
+from app.core.errors import ImageRetrievalFailedError, ValidationError, PayloadTooLargeError
 
 logger = logging.getLogger(__name__)
 
@@ -229,10 +231,91 @@ class ImageRetrievalService:
         }
 
     async def save_uploaded_file(self, filename: str, content: bytes) -> str:
-        """Saves uploaded remote-sensing file into the uploads directory."""
+        """Saves uploaded remote-sensing file into the uploads directory (legacy buffer support)."""
         clean_name = Path(filename).name
         out_path = settings.UPLOADS_DIR / clean_name
         out_path.write_bytes(content)
         return str(out_path)
+
+    async def stream_and_save_upload(
+        self,
+        upload: UploadFile,
+        analysis_id: str,
+        tag: str,
+        current_total_bytes: int = 0,
+        max_file_bytes: Optional[int] = None,
+        max_total_bytes: Optional[int] = None,
+        chunk_size: Optional[int] = None
+    ) -> Tuple[str, int]:
+        """
+        Streams uploaded remote-sensing file in chunks directly to an analysis-scoped
+        upload directory without buffering full contents into RAM.
+        Validates MIME types, extensions, per-file size limits, and cumulative request limits.
+        """
+        file_limit = max_file_bytes if max_file_bytes is not None else settings.MAX_UPLOAD_BYTES
+        total_limit = max_total_bytes if max_total_bytes is not None else settings.MAX_TOTAL_UPLOAD_BYTES
+        chunk_buf = chunk_size if chunk_size is not None else settings.UPLOAD_CHUNK_BYTES
+
+        if not upload or not upload.filename:
+            raise ValidationError("Uploaded file is missing or unnamed.")
+
+        clean_filename = Path(upload.filename).name
+        ext = Path(clean_filename).suffix.lower()
+        allowed_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".webp"}
+        allowed_mimes = {
+            "image/tiff", "image/geotiff", "image/x-geotiff",
+            "image/png", "image/jpeg", "image/webp",
+            "application/octet-stream"
+        }
+
+        if ext not in allowed_exts:
+            raise ValidationError(
+                f"Unsupported file format '{ext}' for '{clean_filename}'. "
+                "Supported formats are GeoTIFF (.tif/.tiff), PNG (.png), JPEG (.jpg/.jpeg), and WebP (.webp)."
+            )
+
+        if upload.content_type and upload.content_type.lower() not in allowed_mimes and ext not in {".tif", ".tiff"}:
+            raise ValidationError(
+                f"Invalid media type '{upload.content_type}' for '{clean_filename}'."
+            )
+
+        target_dir = settings.UPLOADS_DIR / analysis_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        safe_stem = Path(clean_filename).stem[:32]
+        dest_filename = f"{tag.lower()}_{safe_stem}{ext}"
+        dest_path = target_dir / dest_filename
+
+        bytes_written = 0
+        try:
+            with open(dest_path, "wb") as f:
+                while True:
+                    chunk = await upload.read(chunk_buf)
+                    if not chunk:
+                        break
+                    chunk_len = len(chunk)
+                    bytes_written += chunk_len
+
+                    if bytes_written > file_limit:
+                        raise PayloadTooLargeError(
+                            f"File '{clean_filename}' exceeds the maximum allowed file size of "
+                            f"{file_limit // (1024 * 1024)} MB."
+                        )
+
+                    if current_total_bytes + bytes_written > total_limit:
+                        raise PayloadTooLargeError(
+                            f"Total upload size exceeds the maximum allowed limit of "
+                            f"{total_limit // (1024 * 1024)} MB."
+                        )
+
+                    f.write(chunk)
+        except Exception:
+            if dest_path.is_file():
+                try:
+                    dest_path.unlink()
+                except OSError:
+                    pass
+            raise
+
+        return str(dest_path), bytes_written
 
 image_retrieval_service = ImageRetrievalService()

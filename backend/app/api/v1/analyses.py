@@ -1,9 +1,12 @@
 import os
 import uuid
+import shutil
+from pathlib import Path
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Form, File, UploadFile, Query
 from fastapi.responses import FileResponse
 
+from app.core.config import settings
 from app.core.firebase import get_current_user
 from app.core.db import db
 from app.core.errors import NotFoundError, UnauthorizedError, ForbiddenError
@@ -65,22 +68,32 @@ async def create_analysis_multipart(
     """
     analysis_id = f"AN-{uuid.uuid4().hex.upper()}"
     file_paths = {}
+    total_bytes = 0
 
-    if image:
-        content = await image.read()
-        file_paths["Image"] = await image_retrieval_service.save_uploaded_file(image.filename, content)
-    if before:
-        content = await before.read()
-        file_paths["Before"] = await image_retrieval_service.save_uploaded_file(before.filename, content)
-    if after:
-        content = await after.read()
-        file_paths["After"] = await image_retrieval_service.save_uploaded_file(after.filename, content)
-    if optical:
-        content = await optical.read()
-        file_paths["Optical"] = await image_retrieval_service.save_uploaded_file(optical.filename, content)
-    if sar:
-        content = await sar.read()
-        file_paths["SAR"] = await image_retrieval_service.save_uploaded_file(sar.filename, content)
+    uploads_to_process = [
+        ("Image", image),
+        ("Before", before),
+        ("After", after),
+        ("Optical", optical),
+        ("SAR", sar),
+    ]
+
+    try:
+        for tag, upload_file in uploads_to_process:
+            if upload_file:
+                saved_path, written = await image_retrieval_service.stream_and_save_upload(
+                    upload=upload_file,
+                    analysis_id=analysis_id,
+                    tag=tag,
+                    current_total_bytes=total_bytes,
+                )
+                file_paths[tag] = saved_path
+                total_bytes += written
+    except Exception:
+        analysis_upload_dir = settings.UPLOADS_DIR / analysis_id
+        if analysis_upload_dir.is_dir():
+            shutil.rmtree(analysis_upload_dir, ignore_errors=True)
+        raise
 
     await job_manager.start_analysis_job(
         analysis_id=analysis_id,
@@ -151,10 +164,20 @@ async def get_analysis_evidence_file(
         raise ForbiddenError("You are not authorized to access this analysis evidence.")
         
     evidence_path = doc.get("evidence_path")
-    if not evidence_path or not os.path.isfile(evidence_path):
+    if not evidence_path:
+        raise NotFoundError("Evidence image not found.")
+
+    resolved_path = Path(evidence_path).resolve()
+    base_evidence_dir = settings.EVIDENCE_DIR.resolve()
+    try:
+        resolved_path.relative_to(base_evidence_dir)
+    except ValueError:
+        raise ForbiddenError("Invalid evidence path.")
+
+    if not resolved_path.is_file():
         raise NotFoundError("Evidence image not found.")
         
-    return FileResponse(evidence_path, media_type="image/png")
+    return FileResponse(str(resolved_path), media_type="image/png")
 
 @router.get("/{analysis_id}/trace")
 async def get_analysis_trace(

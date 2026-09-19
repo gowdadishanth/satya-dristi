@@ -1,4 +1,5 @@
 import os
+import uuid
 import cv2
 import numpy as np
 from PIL import Image
@@ -17,7 +18,8 @@ class GroundingSpecialist:
         self,
         image_path: str,
         query: str,
-        geo_bbox: Optional[List[float]] = None
+        geo_bbox: Optional[List[float]] = None,
+        analysis_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Locates feature referred to in natural language query within real satellite image.
@@ -120,8 +122,13 @@ class GroundingSpecialist:
             })
 
         primary_box = boxes[0]
-        # Save overlay mask image for evidence
-        mask_out_path = settings.EVIDENCE_DIR / f"grounding_{Path(image_path).stem}.png"
+        # Save overlay mask image for evidence in analysis-scoped directory
+        if analysis_id:
+            analysis_evidence_dir = settings.EVIDENCE_DIR / analysis_id
+            analysis_evidence_dir.mkdir(parents=True, exist_ok=True)
+            mask_out_path = analysis_evidence_dir / "grounding.png"
+        else:
+            mask_out_path = settings.EVIDENCE_DIR / f"grounding_{Path(image_path).stem}_{uuid.uuid4().hex[:8]}.png"
         cv2.imwrite(str(mask_out_path), cleaned)
 
         return {

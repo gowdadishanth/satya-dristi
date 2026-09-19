@@ -56,13 +56,14 @@ async def get_current_user(
     if settings.ENVIRONMENT == "development" and (
         token.startswith("dev-token-") or token.startswith("test-token-") or token.startswith("test_")
     ):
-        uid = token.replace("dev-token-", "").replace("test-token-", "")
+        uid = token.replace("dev-token-", "").replace("test-token-", "").replace("test_", "")
+        is_dev = "admin" in token.lower()
         return {
             "uid": uid or "dev_user_earth_analyst_01",
             "email": f"{uid}@satyadristi.org",
             "name": "Remote Sensing Analyst",
             "picture": "",
-            "is_dev": True
+            "is_dev": is_dev
         }
 
     try:

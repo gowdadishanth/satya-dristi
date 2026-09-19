@@ -23,6 +23,7 @@ class AnalysisJobManager:
 
     def __init__(self):
         self._jobs: Dict[str, Dict[str, Any]] = {}
+        self._tasks: set[asyncio.Task] = set()
 
     def get_job_status(self, analysis_id: str) -> Optional[Dict[str, Any]]:
         if analysis_id in self._jobs:
@@ -79,7 +80,7 @@ class AnalysisJobManager:
             "progress_pct": 5,
             "created_at": datetime.utcnow().isoformat()
         }
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._execute_analysis(
                 analysis_id=analysis_id,
                 uid=uid,
@@ -94,6 +95,8 @@ class AnalysisJobManager:
                 sar_scene_id=sar_scene_id
             )
         )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def _execute_analysis(self, **kwargs):
         aid = kwargs["analysis_id"]
@@ -187,21 +190,24 @@ class AnalysisJobManager:
                     before_image_path=before_image_path,
                     after_image_path=primary_image_path,
                     query=kwargs["query"],
-                    geo_bbox=aoi_bbox
+                    geo_bbox=aoi_bbox,
+                    analysis_id=aid
                 )
             elif task_code == "optical_sar_analysis" and sar_image_path:
                 result_data = await asyncio.to_thread(
                     optical_sar_specialist.fuse_and_analyze,
                     optical_path=primary_image_path,
                     sar_path=sar_image_path,
-                    query=kwargs["query"]
+                    query=kwargs["query"],
+                    analysis_id=aid
                 )
             elif task_code in ["grounding", "segmentation"]:
                 result_data = await asyncio.to_thread(
                     grounding_specialist.ground_feature,
                     image_path=primary_image_path,
                     query=kwargs["query"],
-                    geo_bbox=aoi_bbox
+                    geo_bbox=aoi_bbox,
+                    analysis_id=aid
                 )
                 result_data["answer"] = f"Located {result_data.get('target', 'feature')} matching query parameters in the selected area."
             else:
