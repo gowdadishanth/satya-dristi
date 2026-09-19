@@ -98,13 +98,12 @@ class DatabaseService:
     def save_user(user_data: Dict[str, Any]):
         uid = user_data["uid"]
         user_data["updated_at"] = datetime.utcnow().isoformat()
+        _local_store.set_document("users", uid, user_data)
         if _firestore_client:
             try:
                 _firestore_client.collection("users").document(uid).set(user_data, merge=True)
-                return
             except Exception as e:
                 logger.error("Firestore save_user error: %s", e)
-        _local_store.set_document("users", uid, user_data)
 
     @staticmethod
     def get_user(uid: str) -> Optional[Dict[str, Any]]:
@@ -112,7 +111,9 @@ class DatabaseService:
             try:
                 doc = _firestore_client.collection("users").document(uid).get()
                 if doc.exists:
-                    return doc.to_dict()
+                    data = doc.to_dict()
+                    _local_store.set_document("users", uid, data)
+                    return data
             except Exception as e:
                 logger.error("Firestore get_user error: %s", e)
         return _local_store.get_document("users", uid)
@@ -120,13 +121,12 @@ class DatabaseService:
     @staticmethod
     def save_analysis(analysis_data: Dict[str, Any]):
         aid = analysis_data["analysis_id"]
+        _local_store.set_document("analyses", aid, analysis_data)
         if _firestore_client:
             try:
                 _firestore_client.collection("analyses").document(aid).set(analysis_data, merge=True)
-                return
             except Exception as e:
                 logger.error("Firestore save_analysis error: %s", e)
-        _local_store.set_document("analyses", aid, analysis_data)
 
     @staticmethod
     def get_analysis(analysis_id: str) -> Optional[Dict[str, Any]]:
@@ -134,7 +134,9 @@ class DatabaseService:
             try:
                 doc = _firestore_client.collection("analyses").document(analysis_id).get()
                 if doc.exists:
-                    return doc.to_dict()
+                    data = doc.to_dict()
+                    _local_store.set_document("analyses", analysis_id, data)
+                    return data
             except Exception as e:
                 logger.error("Firestore get_analysis error: %s", e)
         return _local_store.get_document("analyses", analysis_id)
@@ -151,7 +153,11 @@ class DatabaseService:
                 if task and task != "All":
                     query = query.where("task", "==", task)
                 query = query.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit)
-                return [d.to_dict() for d in query.stream()]
+                docs = [d.to_dict() for d in query.stream()]
+                for d in docs:
+                    if "analysis_id" in d:
+                        _local_store.set_document("analyses", d["analysis_id"], d)
+                return docs
             except Exception as e:
                 logger.error("Firestore list_analyses error: %s", e)
         return _local_store.query_collection("analyses", filters=filters, limit=limit, order_by_desc="created_at")
@@ -166,19 +172,19 @@ class DatabaseService:
                 _firestore_client.collection("analyses").document(analysis_id).delete()
             except Exception as e:
                 logger.error("Firestore delete_analysis error: %s", e)
+                return False
         _local_store.delete_document("analyses", analysis_id)
         return True
 
     @staticmethod
     def save_report(report_data: Dict[str, Any]):
         rid = report_data["report_id"]
+        _local_store.set_document("reports", rid, report_data)
         if _firestore_client:
             try:
                 _firestore_client.collection("reports").document(rid).set(report_data, merge=True)
-                return
             except Exception as e:
                 logger.error("Firestore save_report error: %s", e)
-        _local_store.set_document("reports", rid, report_data)
 
     @staticmethod
     def get_report(report_id: str) -> Optional[Dict[str, Any]]:
@@ -186,7 +192,9 @@ class DatabaseService:
             try:
                 doc = _firestore_client.collection("reports").document(report_id).get()
                 if doc.exists:
-                    return doc.to_dict()
+                    data = doc.to_dict()
+                    _local_store.set_document("reports", report_id, data)
+                    return data
             except Exception as e:
                 logger.error("Firestore get_report error: %s", e)
         return _local_store.get_document("reports", report_id)
@@ -196,7 +204,11 @@ class DatabaseService:
         if _firestore_client:
             try:
                 query = _firestore_client.collection("reports").where("uid", "==", uid).order_by("generated_at", direction=firestore.Query.DESCENDING).limit(limit)
-                return [d.to_dict() for d in query.stream()]
+                docs = [d.to_dict() for d in query.stream()]
+                for d in docs:
+                    if "report_id" in d:
+                        _local_store.set_document("reports", d["report_id"], d)
+                return docs
             except Exception as e:
                 logger.error("Firestore list_reports error: %s", e)
         return _local_store.query_collection("reports", filters={"uid": uid}, limit=limit, order_by_desc="generated_at")

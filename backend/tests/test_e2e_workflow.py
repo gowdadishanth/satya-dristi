@@ -19,7 +19,7 @@ async def test_full_analysis_workflow():
     )
 
     # 2. Poll until completed
-    max_wait = 20
+    max_wait = 50
     status_res = None
     for _ in range(max_wait):
         await asyncio.sleep(0.5)

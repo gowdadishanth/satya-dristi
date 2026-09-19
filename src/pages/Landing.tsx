@@ -16,7 +16,7 @@ const capIcon: Record<string, any> = {
 export function Landing({ navigate }: { navigate: (r: Route) => void }) {
   const handleSignIn = async () => {
     try {
-      await authService.loginWithGoogle();
+      await authService.signInWithGoogle();
     } catch {
       // Dev analyst fallback handled automatically
     }

@@ -48,15 +48,6 @@ async def get_current_user(
         raw_token = token.strip()
 
     if not raw_token:
-        # Check if local dev token is allowed in development environment
-        if settings.ENVIRONMENT == "development":
-            return {
-                "uid": "dev_user_earth_analyst_01",
-                "email": "analyst@satyadristi.org",
-                "name": "R. Sharma",
-                "picture": "",
-                "is_dev": True
-            }
         raise UnauthorizedError("Missing or malformed Authorization credentials.")
 
     token = raw_token

@@ -2,7 +2,6 @@ import logging
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.errors import SatyaDristiError
@@ -37,10 +36,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
 )
-
-# Static file access for evidence and reports
-app.mount("/static/evidence", StaticFiles(directory=str(settings.EVIDENCE_DIR)), name="evidence")
-app.mount("/static/reports", StaticFiles(directory=str(settings.REPORTS_DIR)), name="reports")
 
 # Exception handler for domain errors
 @app.exception_handler(SatyaDristiError)

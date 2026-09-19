@@ -82,7 +82,7 @@ export function Shell({
       authService.signOut();
     } else {
       try {
-        await authService.loginWithGoogle();
+        await authService.signInWithGoogle();
       } catch {
         // Fallback already handled
       }
@@ -183,15 +183,15 @@ export function Shell({
               className="focus-ring flex items-center gap-2 rounded-md border border-border px-2 py-1.5 hover:bg-muted"
               title={user ? `Signed in as ${user.email}. Click to sign out.` : "Click to sign in with Google"}
             >
-              {user?.photoURL ? (
-                <img src={user.photoURL} alt="" className="h-6 w-6 rounded object-cover" />
+              {user?.picture || user?.photoURL ? (
+                <img src={user.picture || user.photoURL} alt="" className="h-6 w-6 rounded object-cover" />
               ) : (
                 <span className="grid h-6 w-6 place-items-center rounded bg-accent text-[11px] font-semibold text-accent-foreground">
-                  {user ? (user.displayName ? user.displayName.slice(0, 2).toUpperCase() : "US") : "SD"}
+                  {user ? ((user.name || user.displayName) ? (user.name || user.displayName)!.slice(0, 2).toUpperCase() : "US") : "SD"}
                 </span>
               )}
               <span className="hidden text-xs font-medium sm:block">
-                {user ? user.displayName || "Analyst" : "Sign In"}
+                {user ? user.name || user.displayName || "Analyst" : "Sign In"}
               </span>
             </button>
           </div>

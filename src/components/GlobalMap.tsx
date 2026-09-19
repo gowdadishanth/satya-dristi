@@ -149,13 +149,14 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
     try {
       const preview = await api.earth.previewAOI({ bbox });
       setAoi(preview);
-    } catch {
-      setAoi({
-        geometry: { type: "Polygon", coordinates: [] },
-        bbox,
-        centroid: [Number(bounds.getCenter().lng.toFixed(4)), Number(bounds.getCenter().lat.toFixed(4))],
-        area_sq_km: 12.4,
-      });
+      setErrorMsg(null);
+    } catch (err: any) {
+      setAoi(null);
+      setErrorMsg(err?.message || "Invalid AOI bounds or AOI validation failed.");
+      if (aoiLayerRef.current && mapRef.current) {
+        mapRef.current.removeLayer(aoiLayerRef.current);
+        aoiLayerRef.current = null;
+      }
     }
   };
 

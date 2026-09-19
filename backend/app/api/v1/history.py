@@ -1,3 +1,4 @@
+import hashlib
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from app.core.firebase import get_current_user
@@ -5,6 +6,10 @@ from app.core.db import db
 from app.schemas.analysis import AnalysisDetailResponse
 
 router = APIRouter(prefix="/history", tags=["Analysis History"])
+
+def get_user_scoped_aid(base_aid: str, uid: str) -> str:
+    user_tag = hashlib.sha256(uid.encode("utf-8")).hexdigest()[:8].upper()
+    return f"AN-{user_tag}-{base_aid.replace('AN-', '')}"
 
 @router.get("", response_model=List[AnalysisDetailResponse])
 async def get_history(
@@ -24,7 +29,7 @@ async def get_history(
     if not analyses:
         seed_analyses = [
             {
-                "analysis_id": "AN-2041",
+                "analysis_id": get_user_scoped_aid("AN-2041", uid),
                 "uid": uid,
                 "query": "What changed between these two dates along the river corridor?",
                 "task": "Bi-Temporal Change",
@@ -48,7 +53,7 @@ async def get_history(
                 "completed_at": "2026-09-14T11:24:02Z"
             },
             {
-                "analysis_id": "AN-2038",
+                "analysis_id": get_user_scoped_aid("AN-2038", uid),
                 "uid": uid,
                 "query": "Use the optical and SAR images together to identify built-up and water-covered regions.",
                 "task": "Optical + SAR Fusion",

@@ -172,27 +172,31 @@ class AnalysisJobManager:
 
             result_data = {}
             if task_code == "bi_temporal_change" and before_image_path:
-                result_data = change_specialist.analyze_change(
+                result_data = await asyncio.to_thread(
+                    change_specialist.analyze_change,
                     before_image_path=before_image_path,
                     after_image_path=primary_image_path,
                     query=kwargs["query"],
                     geo_bbox=aoi_bbox
                 )
             elif task_code == "optical_sar_analysis" and sar_image_path:
-                result_data = optical_sar_specialist.fuse_and_analyze(
+                result_data = await asyncio.to_thread(
+                    optical_sar_specialist.fuse_and_analyze,
                     optical_path=primary_image_path,
                     sar_path=sar_image_path,
                     query=kwargs["query"]
                 )
             elif task_code in ["grounding", "segmentation"]:
-                result_data = grounding_specialist.ground_feature(
+                result_data = await asyncio.to_thread(
+                    grounding_specialist.ground_feature,
                     image_path=primary_image_path,
                     query=kwargs["query"],
                     geo_bbox=aoi_bbox
                 )
                 result_data["answer"] = f"Located {result_data.get('target', 'feature')} matching query parameters in the selected area."
             else:
-                result_data = vqa_specialist.answer_query(
+                result_data = await asyncio.to_thread(
+                    vqa_specialist.answer_query,
                     image_path=primary_image_path,
                     query=kwargs["query"],
                     aoi_metadata=aoi_info
@@ -213,7 +217,19 @@ class AnalysisJobManager:
                     "sar_agree": True
                 }
             )
-            record_stage("Confidence estimation", f"{conf_result['level']} ({conf_result['basis']})", time.time() - t0)
+            
+            if "confidence" in result_data and "confidence_score" in result_data:
+                conf_level = result_data["confidence"]
+                conf_score = result_data["confidence_score"]
+                conf_agreements = result_data.get("agreements", conf_result["agreements"])
+                conf_basis = "Derived from cross-modal spectral and radar backscatter overlap"
+            else:
+                conf_level = conf_result["level"]
+                conf_score = conf_result["calibrated_score"]
+                conf_agreements = conf_result["agreements"]
+                conf_basis = conf_result["basis"]
+
+            record_stage("Confidence estimation", f"{conf_level} ({conf_basis})", time.time() - t0)
 
             # Stage 6: Finalize analysis document
             total_duration = time.time() - t0_total
@@ -228,10 +244,10 @@ class AnalysisJobManager:
                 "input": "Before + After" if task_code == "bi_temporal_change" else "Optical + SAR" if task_code == "optical_sar_analysis" else "Single image",
                 "date": completed_at[:10],
                 "time": completed_at[11:16],
-                "confidence": conf_result["level"],
-                "confidence_score": conf_result["calibrated_score"],
-                "agreements": conf_result["agreements"],
-                "confidence_basis": conf_result["basis"],
+                "confidence": conf_level,
+                "confidence_score": conf_score,
+                "agreements": conf_agreements,
+                "confidence_basis": conf_basis,
                 "status": "Complete",
                 "answer": result_data.get("answer", "Analysis completed."),
                 "observed_evidence": result_data.get("observed_evidence", "Evidence registered to ground scene."),

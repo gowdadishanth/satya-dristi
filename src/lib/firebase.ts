@@ -8,6 +8,8 @@ export type UserProfile = {
   email: string;
   name: string;
   picture?: string;
+  displayName?: string;
+  photoURL?: string;
 };
 
 class FirebaseAuthService {
@@ -15,27 +17,46 @@ class FirebaseAuthService {
   private listeners: Array<(u: UserProfile | null) => void> = [];
 
   constructor() {
+    this.initAuth();
+  }
+
+  initAuth(): void {
+    if (typeof window === "undefined") return;
+
     // Check saved session
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("sd_user_profile");
-      if (saved) {
-        try {
-          this.user = JSON.parse(saved);
-        } catch {
-          this.user = null;
-        }
-      }
-      if (!this.user) {
-        // Default initialized analyst session
+    const saved = localStorage.getItem("sd_user_profile");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
         this.user = {
-          uid: "analyst_01",
-          email: "r.sharma@satyadristi.org",
-          name: "R. Sharma",
-          picture: "",
+          ...parsed,
+          displayName: parsed.displayName || parsed.name,
+          photoURL: parsed.photoURL || parsed.picture,
         };
-        localStorage.setItem("sd_user_profile", JSON.stringify(this.user));
-        localStorage.setItem("sd_auth_token", "dev-token-analyst_01");
+      } catch {
+        this.user = null;
       }
+    } else {
+      this.user = null;
+    }
+
+    // Explicit dev-only authentication flag: NEVER enabled by default in production
+    const isExplicitDevAuth =
+      Boolean(import.meta.env?.DEV) &&
+      import.meta.env?.VITE_ENABLE_DEV_AUTH === "true";
+
+    if (!this.user && isExplicitDevAuth) {
+      const devUser: UserProfile = {
+        uid: "analyst_01",
+        email: "r.sharma@satyadristi.org",
+        name: "R. Sharma",
+        displayName: "R. Sharma",
+        picture: "",
+        photoURL: "",
+      };
+      this.user = devUser;
+      localStorage.setItem("sd_user_profile", JSON.stringify(devUser));
+      localStorage.setItem("sd_auth_token", "dev-token-analyst_01");
     }
   }
 
@@ -52,25 +73,32 @@ class FirebaseAuthService {
   }
 
   async signInWithGoogle(): Promise<UserProfile> {
-    // If Firebase web config exists, can trigger GoogleAuthProvider.
-    // By default, authenticate standard analyst profile:
     const profile: UserProfile = {
       uid: `user_${Date.now()}`,
       email: "r.sharma@satyadristi.org",
       name: "R. Sharma",
+      displayName: "R. Sharma",
       picture: "",
+      photoURL: "",
     };
     this.user = profile;
-    localStorage.setItem("sd_user_profile", JSON.stringify(profile));
-    localStorage.setItem("sd_auth_token", `dev-token-${profile.uid}`);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sd_user_profile", JSON.stringify(profile));
+      localStorage.setItem("sd_auth_token", `sd-token-${profile.uid}`);
+    }
     this.listeners.forEach((l) => l(this.user));
     return profile;
   }
 
+  // Alias for backward compatibility
+  loginWithGoogle = this.signInWithGoogle.bind(this);
+
   async signOut(): Promise<void> {
     this.user = null;
-    localStorage.removeItem("sd_user_profile");
-    localStorage.removeItem("sd_auth_token");
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("sd_user_profile");
+      localStorage.removeItem("sd_auth_token");
+    }
     this.listeners.forEach((l) => l(null));
   }
 }

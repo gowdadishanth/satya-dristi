@@ -1,4 +1,5 @@
 import os
+import asyncio
 import hashlib
 import logging
 import io
@@ -82,31 +83,34 @@ class ImageRetrievalService:
         cog_url: str,
         aoi_bbox: List[float]
     ) -> Optional[Image.Image]:
-        """Attempts to stream the exact AOI window from a remote Cloud-Optimized GeoTIFF."""
-        try:
-            with rasterio.open(cog_url) as src:
-                transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
-                minx, miny = transformer.transform(aoi_bbox[0], aoi_bbox[1])
-                maxx, maxy = transformer.transform(aoi_bbox[2], aoi_bbox[3])
-                window = from_bounds(minx, miny, maxx, maxy, src.transform)
-                
-                if window.width > 10 and window.height > 10:
-                    if src.count >= 3:
-                        bands = src.read([1, 2, 3], window=window)
-                        arr = np.transpose(bands, (1, 2, 0)).astype(np.float32)
-                    else:
-                        b = src.read(1, window=window).astype(np.float32)
-                        arr = np.stack([b, b, b], axis=-1)
+        """Attempts to stream the exact AOI window from a remote Cloud-Optimized GeoTIFF on a worker thread."""
+        def _read_window_sync() -> Optional[Image.Image]:
+            try:
+                with rasterio.open(cog_url) as src:
+                    transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+                    minx, miny = transformer.transform(aoi_bbox[0], aoi_bbox[1])
+                    maxx, maxy = transformer.transform(aoi_bbox[2], aoi_bbox[3])
+                    window = from_bounds(minx, miny, maxx, maxy, src.transform)
                     
-                    p2, p98 = np.percentile(arr, (2, 98))
-                    if p98 > p2:
-                        norm = np.clip((arr - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
-                    else:
-                        norm = np.clip(arr, 0, 255).astype(np.uint8)
-                    return Image.fromarray(norm)
-        except Exception as e:
-            logger.debug("COG window extraction skipped for %s: %s", cog_url, e)
-        return None
+                    if window.width > 10 and window.height > 10:
+                        if src.count >= 3:
+                            bands = src.read([1, 2, 3], window=window)
+                            arr = np.transpose(bands, (1, 2, 0)).astype(np.float32)
+                        else:
+                            b = src.read(1, window=window).astype(np.float32)
+                            arr = np.stack([b, b, b], axis=-1)
+                        
+                        p2, p98 = np.percentile(arr, (2, 98))
+                        if p98 > p2:
+                            norm = np.clip((arr - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
+                        else:
+                            norm = np.clip(arr, 0, 255).astype(np.uint8)
+                        return Image.fromarray(norm)
+            except Exception as e:
+                logger.debug("COG window extraction skipped for %s: %s", cog_url, e)
+            return None
+
+        return await asyncio.to_thread(_read_window_sync)
 
     async def _fetch_arcgis_high_res_export(
         self,

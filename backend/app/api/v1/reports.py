@@ -1,5 +1,6 @@
 import os
 import re
+import hashlib
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -133,14 +134,22 @@ def sanitize_filename(filename: str) -> str:
     name = re.sub(r'[\\/*?:"<>|]', "", filename)
     return name.strip() or "Satya_Dristi_Report.bin"
 
-def find_or_create_report_for_id(report_id: str, uid: str) -> Dict[str, Any]:
+def get_user_scoped_id(base_id: str, uid: str) -> str:
+    user_tag = hashlib.sha256(uid.encode("utf-8")).hexdigest()[:8].upper()
+    if base_id.startswith("AN-"):
+        return f"AN-{user_tag}-{base_id[3:]}"
+    if base_id.startswith("REP-"):
+        return f"REP-{user_tag}-{base_id[4:]}"
+    return f"{base_id}-{user_tag}"
+
+def find_or_create_report_for_id(report_id: str, uid: str, is_dev: bool = False) -> Dict[str, Any]:
     """
     Robustly resolves a report or analysis by any identifier:
     - Direct report_id (e.g. REP-2041)
     - Direct analysis_id (e.g. AN-2041)
     - Legacy ID (e.g. ana-01)
     - Suffix ID (e.g. 2041)
-    Generates verified report artifacts if missing.
+    Enforces user ownership and tenant isolation.
     """
     # 1. Map legacy IDs
     target_id = LEGACY_ID_MAP.get(report_id, report_id)
@@ -148,32 +157,60 @@ def find_or_create_report_for_id(report_id: str, uid: str) -> Dict[str, Any]:
     # 2. Try direct report lookup
     rep = db.get_report(target_id)
     if rep:
+        if not is_dev and rep.get("uid") and rep["uid"] != uid:
+            raise ForbiddenError("You are not authorized to access this report.")
         return rep
 
     # 3. Try with/without REP- prefix
     alt_rep_id = f"REP-{target_id}" if not target_id.startswith("REP-") else target_id.replace("REP-", "")
     rep = db.get_report(alt_rep_id)
     if rep:
+        if not is_dev and rep.get("uid") and rep["uid"] != uid:
+            raise ForbiddenError("You are not authorized to access this report.")
         return rep
 
-    # 4. Try analysis lookup in database
+    # 4. Try user-scoped report ID
+    scoped_rep_id = get_user_scoped_id(target_id if target_id.startswith("REP-") else f"REP-{target_id}", uid)
+    rep = db.get_report(scoped_rep_id)
+    if rep:
+        if not is_dev and rep.get("uid") and rep["uid"] != uid:
+            raise ForbiddenError("You are not authorized to access this report.")
+        return rep
+
+    # 5. Try analysis lookup in database
     target_aid = target_id.replace("REP-", "AN-") if target_id.startswith("REP-") else target_id
     analysis = db.get_analysis(target_aid)
     if not analysis and not target_aid.startswith("AN-"):
         analysis = db.get_analysis(f"AN-{target_aid}")
 
-    # 5. Check canonical seeds if not found in database
+    if analysis:
+        if not is_dev and analysis.get("uid") and analysis["uid"] != uid:
+            raise ForbiddenError("You are not authorized to access the analysis for this report.")
+
+    # 6. Try user-scoped analysis lookup in database
+    scoped_aid = get_user_scoped_id(target_aid if target_aid.startswith("AN-") else f"AN-{target_aid}", uid)
     if not analysis:
+        analysis = db.get_analysis(scoped_aid)
+        if analysis and not is_dev and analysis.get("uid") and analysis["uid"] != uid:
+            raise ForbiddenError("You are not authorized to access the analysis for this report.")
+
+    # 7. Check canonical seeds if not found in database; isolate per user
+    if not analysis:
+        clean_target = target_aid.replace("AN-", "")
         for seed in CANONICAL_SEEDS:
-            if seed["analysis_id"] in [target_id, target_aid, f"AN-{target_id}"]:
+            seed_clean = seed["analysis_id"].replace("AN-", "")
+            if seed_clean == clean_target or seed["analysis_id"] in [target_id, target_aid, f"AN-{target_id}"]:
                 analysis = dict(seed)
+                analysis["analysis_id"] = get_user_scoped_id(seed["analysis_id"], uid)
                 analysis["uid"] = uid
                 db.save_analysis(analysis)
                 break
 
-    # 6. If found as analysis, generate artifacts
+    # 8. If found as analysis, generate artifacts
     if analysis:
         rep = report_generator.generate_report_artifacts(analysis)
+        rep["uid"] = uid
+        db.save_report(rep)
         return rep
 
     raise NotFoundError(f"Report or analysis record '{report_id}' could not be located.")
@@ -193,6 +230,7 @@ async def list_reports(current_user: dict = Depends(get_current_user)):
         if not analyses:
             for seed in CANONICAL_SEEDS:
                 a_seed = dict(seed)
+                a_seed["analysis_id"] = get_user_scoped_id(seed["analysis_id"], uid)
                 a_seed["uid"] = uid
                 db.save_analysis(a_seed)
                 analyses.append(a_seed)
@@ -200,6 +238,8 @@ async def list_reports(current_user: dict = Depends(get_current_user)):
         for a in analyses:
             try:
                 r = report_generator.generate_report_artifacts(a)
+                r["uid"] = uid
+                db.save_report(r)
                 reports.append(r)
             except Exception as e:
                 logger.error("Failed auto-generating report for %s: %s", a.get("analysis_id"), e)
@@ -213,7 +253,10 @@ async def get_report_detail(
 ):
     """Retrieves metadata for a specific report."""
     uid = current_user["uid"]
-    rep = find_or_create_report_for_id(report_id, uid)
+    is_dev = current_user.get("is_dev", False)
+    rep = find_or_create_report_for_id(report_id, uid, is_dev=is_dev)
+    if not is_dev and rep.get("uid") and rep["uid"] != uid:
+        raise ForbiddenError("You are not authorized to access this report.")
     return rep
 
 @router.get("/{report_id}/download")
@@ -227,10 +270,11 @@ async def download_report_pdf(
     Validates PDF integrity on disk; automatically regenerates if missing or corrupt.
     """
     uid = current_user["uid"]
-    rep = find_or_create_report_for_id(report_id, uid)
+    is_dev = current_user.get("is_dev", False)
+    rep = find_or_create_report_for_id(report_id, uid, is_dev=is_dev)
 
     # Enforce report ownership for non-dev users
-    if not current_user.get("is_dev") and rep.get("uid") and rep["uid"] != uid:
+    if not is_dev and rep.get("uid") and rep["uid"] != uid:
         raise ForbiddenError("You are not authorized to download this report document.")
 
     pdf_path = rep.get("pdf_path")
@@ -240,9 +284,12 @@ async def download_report_pdf(
         target_aid = rep.get("analysis_id") or report_id
         analysis = db.get_analysis(target_aid)
         if not analysis:
+            clean_target = target_aid.replace("AN-", "")
             for seed in CANONICAL_SEEDS:
-                if seed["analysis_id"] == target_aid:
+                seed_clean = seed["analysis_id"].replace("AN-", "")
+                if seed_clean == clean_target or seed["analysis_id"] == target_aid:
                     analysis = dict(seed)
+                    analysis["analysis_id"] = get_user_scoped_id(seed["analysis_id"], uid)
                     analysis["uid"] = uid
                     db.save_analysis(analysis)
                     break
@@ -250,6 +297,8 @@ async def download_report_pdf(
             raise NotFoundError(f"Underlying analysis for report '{report_id}' not found.")
         
         rep = report_generator.generate_report_artifacts(analysis)
+        rep["uid"] = uid
+        db.save_report(rep)
         pdf_path = rep.get("pdf_path")
 
     if not pdf_path or not os.path.exists(pdf_path) or not report_generator.is_valid_pdf_file(pdf_path):
@@ -283,10 +332,11 @@ async def download_report_json(
     Validates JSON integrity on disk; automatically regenerates if missing or corrupt.
     """
     uid = current_user["uid"]
-    rep = find_or_create_report_for_id(report_id, uid)
+    is_dev = current_user.get("is_dev", False)
+    rep = find_or_create_report_for_id(report_id, uid, is_dev=is_dev)
 
     # Enforce report ownership for non-dev users
-    if not current_user.get("is_dev") and rep.get("uid") and rep["uid"] != uid:
+    if not is_dev and rep.get("uid") and rep["uid"] != uid:
         raise ForbiddenError("You are not authorized to download this report metadata.")
 
     json_path = rep.get("json_path")
@@ -295,9 +345,12 @@ async def download_report_json(
         target_aid = rep.get("analysis_id") or report_id
         analysis = db.get_analysis(target_aid)
         if not analysis:
+            clean_target = target_aid.replace("AN-", "")
             for seed in CANONICAL_SEEDS:
-                if seed["analysis_id"] == target_aid:
+                seed_clean = seed["analysis_id"].replace("AN-", "")
+                if seed_clean == clean_target or seed["analysis_id"] == target_aid:
                     analysis = dict(seed)
+                    analysis["analysis_id"] = get_user_scoped_id(seed["analysis_id"], uid)
                     analysis["uid"] = uid
                     db.save_analysis(analysis)
                     break
@@ -305,6 +358,8 @@ async def download_report_json(
             raise NotFoundError(f"Underlying analysis for report '{report_id}' not found.")
         
         rep = report_generator.generate_report_artifacts(analysis)
+        rep["uid"] = uid
+        db.save_report(rep)
         json_path = rep.get("json_path")
 
     if not json_path or not os.path.exists(json_path) or not report_generator.is_valid_json_file(json_path):

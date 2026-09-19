@@ -5,11 +5,11 @@
 
 const API_BASE = "/api/v1";
 
-function getAuthToken(): string {
+function getAuthToken(): string | null {
   if (typeof window !== "undefined") {
-    return localStorage.getItem("sd_auth_token") || "dev-token-analyst_01";
+    return localStorage.getItem("sd_auth_token") || null;
   }
-  return "dev-token-analyst_01";
+  return null;
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -356,7 +356,7 @@ export const api = {
       location?: string;
       bbox?: number[];
       year?: number;
-      sensor?: "sentinel2" | "sentinel1";
+      sensor?: "sentinel2" | "sentinel1" | "optical" | "sar";
       cloud_cover_max?: number;
       limit?: number;
     }) => request<Scene[]>("/earth/scenes/search", { method: "POST", body: JSON.stringify(params) }),

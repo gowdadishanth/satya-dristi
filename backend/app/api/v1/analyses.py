@@ -1,3 +1,4 @@
+import os
 import uuid
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Form, File, UploadFile, Query
@@ -5,7 +6,7 @@ from fastapi.responses import FileResponse
 
 from app.core.firebase import get_current_user
 from app.core.db import db
-from app.core.errors import NotFoundError, UnauthorizedError
+from app.core.errors import NotFoundError, UnauthorizedError, ForbiddenError
 from app.services.async_queue import job_manager
 from app.services.image_retrieval import image_retrieval_service
 from app.schemas.analysis import (
@@ -25,7 +26,7 @@ async def create_analysis_json(
     Submits an asynchronous Earth observation analysis task via JSON payload.
     Supports single image VQA, grounding, bi-temporal change, and optical-SAR fusion.
     """
-    analysis_id = f"AN-{str(uuid.uuid4())[:8].upper()}"
+    analysis_id = f"AN-{uuid.uuid4().hex.upper()}"
     
     await job_manager.start_analysis_job(
         analysis_id=analysis_id,
@@ -62,7 +63,7 @@ async def create_analysis_multipart(
     """
     Submits an asynchronous analysis task with direct user-uploaded remote sensing imagery (GeoTIFF/PNG/JPEG).
     """
-    analysis_id = f"AN-{str(uuid.uuid4())[:8].upper()}"
+    analysis_id = f"AN-{uuid.uuid4().hex.upper()}"
     file_paths = {}
 
     if image:
@@ -124,7 +125,7 @@ async def get_analysis_detail(
     
     # Check multi-tenancy authorization (allow dev user access)
     if not current_user.get("is_dev") and doc.get("uid") != current_user["uid"]:
-        raise UnauthorizedError("You are not authorized to view this analysis.")
+        raise ForbiddenError("You are not authorized to view this analysis.")
         
     return doc
 
@@ -138,8 +139,12 @@ async def get_analysis_evidence_file(
     if not doc:
         raise NotFoundError(f"Analysis '{analysis_id}' not found.")
     
+    # Enforce multi-tenancy ownership (allow dev user access)
+    if not current_user.get("is_dev") and doc.get("uid") != current_user["uid"]:
+        raise ForbiddenError("You are not authorized to access this analysis evidence.")
+        
     evidence_path = doc.get("evidence_path")
-    if not evidence_path or not FileResponse(evidence_path):
+    if not evidence_path or not os.path.isfile(evidence_path):
         raise NotFoundError("Evidence image not found.")
         
     return FileResponse(evidence_path, media_type="image/png")
@@ -153,6 +158,11 @@ async def get_analysis_trace(
     doc = db.get_analysis(analysis_id)
     if not doc:
         raise NotFoundError(f"Analysis '{analysis_id}' not found.")
+        
+    # Enforce multi-tenancy ownership (allow dev user access)
+    if not current_user.get("is_dev") and doc.get("uid") != current_user["uid"]:
+        raise ForbiddenError("You are not authorized to view this analysis trace.")
+        
     return {
         "analysis_id": analysis_id,
         "task": doc.get("task"),

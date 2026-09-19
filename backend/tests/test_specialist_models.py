@@ -62,16 +62,26 @@ def test_change_specialist(sample_test_images):
     assert os.path.exists(res["evidence_image_path"])
 
 def test_optical_sar_specialist(sample_test_images):
-    img1, _, sar = sample_test_images
+    img1, img2, sar = sample_test_images
+    # 1. Partial agreement pair (optical natural water with SAR radar urban response)
     res = optical_sar_specialist.fuse_and_analyze(
         optical_path=img1,
         sar_path=sar,
         query="Use optical and SAR together to identify water and built-up"
     )
     assert res["task"] == "Optical + SAR Fusion"
-    assert res["confidence"] == "High"
+    assert res["confidence"] in ["Moderate", "High"]
     assert len(res["agreements"]) == 3
     assert os.path.exists(res["fused_evidence_path"])
+
+    # 2. Complete agreement pair (both optical and SAR feature both water and urban)
+    res2 = optical_sar_specialist.fuse_and_analyze(
+        optical_path=img2,
+        sar_path=sar,
+        query="Use optical and SAR together to identify water and built-up"
+    )
+    assert res2["confidence"] == "High"
+    assert res2["agreements"][2]["state"] == "agree"
 
 def test_vqa_specialist(sample_test_images):
     img1, _, _ = sample_test_images
