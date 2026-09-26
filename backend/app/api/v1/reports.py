@@ -161,16 +161,22 @@ def find_or_create_report_for_id(report_id: str, uid: str, is_dev: bool = False)
             raise ForbiddenError("You are not authorized to access this report.")
         return rep
 
-    # 3. Try with/without REP- prefix
-    alt_rep_id = f"REP-{target_id}" if not target_id.startswith("REP-") else target_id.replace("REP-", "")
-    rep = db.get_report(alt_rep_id)
-    if rep:
-        if not is_dev and rep.get("uid") and rep["uid"] != uid:
-            raise ForbiddenError("You are not authorized to access this report.")
-        return rep
+    # 3. Try with/without REP- prefix or converted from AN-
+    rep_variants = [
+        f"REP-{target_id.replace('AN-', '').replace('REP-', '')}",
+        f"REP-{target_id}",
+        target_id.replace("REP-", "").replace("AN-", "")
+    ]
+    for r_cand in rep_variants:
+        rep = db.get_report(r_cand)
+        if rep:
+            if not is_dev and rep.get("uid") and rep["uid"] != uid:
+                raise ForbiddenError("You are not authorized to access this report.")
+            return rep
 
     # 4. Try user-scoped report ID
-    scoped_rep_id = get_user_scoped_id(target_id if target_id.startswith("REP-") else f"REP-{target_id}", uid)
+    base_clean = target_id.replace("AN-", "").replace("REP-", "")
+    scoped_rep_id = get_user_scoped_id(f"REP-{base_clean}", uid)
     rep = db.get_report(scoped_rep_id)
     if rep:
         if not is_dev and rep.get("uid") and rep["uid"] != uid:

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Route } from "../App";
 import { Brand } from "../components/Shell";
 import { Panel, Button, Eyebrow, Badge, Confidence } from "../components/ui";
@@ -8,34 +9,34 @@ import {
   IconEvidence, IconTrace, IconDownload, IconStatus, IconLayers,
 } from "../components/icons";
 import { authService } from "../lib/firebase";
+import { AuthModal, GoogleIcon } from "../components/AuthModal";
 
 const capIcon: Record<string, any> = {
   optical: IconOptical, sar: IconSar, change: IconChange, grounding: IconGrounding,
 };
 
 export function Landing({ navigate }: { navigate: (r: Route) => void }) {
-  const handleSignIn = async () => {
-    try {
-      await authService.signInWithGoogle();
-    } catch {
-      // Dev analyst fallback handled automatically
-    }
-    navigate("dashboard");
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  const handleSignIn = () => {
+    setShowAuthModal(true);
   };
 
   return (
     <div className="app-bg min-h-screen">
       {/* Top nav */}
       <header className="sticky top-0 z-30 border-b border-border bg-card/85 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-5">
-          <Brand />
-          <nav className="ml-auto hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-            <a href="#capabilities" className="hover:text-foreground">Capabilities</a>
-            <a href="#how" className="hover:text-foreground">How it works</a>
-            <a href="#evidence" className="hover:text-foreground">Evidence</a>
-            <a href="#workflows" className="hover:text-foreground">Workflows</a>
-          </nav>
-          <div className="ml-auto flex items-center gap-2 md:ml-0">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5">
+          <div className="flex items-center gap-8">
+            <Brand onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
+            <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
+              <a href="#capabilities" className="hover:text-foreground transition-colors">Capabilities</a>
+              <a href="#how" className="hover:text-foreground transition-colors">How it works</a>
+              <a href="#evidence" className="hover:text-foreground transition-colors">Evidence</a>
+              <a href="#workflows" className="hover:text-foreground transition-colors">Workflows</a>
+            </nav>
+          </div>
+          <div className="flex items-center gap-2.5">
             <Button variant="ghost" size="sm" onClick={handleSignIn}>Sign in</Button>
             <Button variant="primary" size="sm" onClick={() => navigate("analyze")}>Open workspace</Button>
           </div>
@@ -181,7 +182,7 @@ export function Landing({ navigate }: { navigate: (r: Route) => void }) {
       <footer className="border-t border-border">
         <div className="mx-auto grid max-w-6xl gap-8 px-5 py-12 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <Brand />
+            <Brand onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
             <p className="mt-3 max-w-xs text-[12.5px] leading-relaxed text-muted-foreground">
               Interactive multimodal satellite intelligence for evidence-grounded analysis.
             </p>
@@ -204,6 +205,15 @@ export function Landing({ navigate }: { navigate: (r: Route) => void }) {
           </div>
         </div>
       </footer>
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={() => {
+          setShowAuthModal(false);
+          navigate("dashboard");
+        }}
+      />
     </div>
   );
 }

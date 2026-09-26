@@ -15,9 +15,16 @@ logger = logging.getLogger(__name__)
 _firestore_client = None
 try:
     from google.cloud import firestore
-    if settings.FIREBASE_CREDENTIALS_PATH or settings.GOOGLE_APPLICATION_CREDENTIALS or os.getenv("FIRESTORE_EMULATOR_HOST"):
+    cred_file = settings.FIREBASE_CREDENTIALS_PATH or settings.GOOGLE_APPLICATION_CREDENTIALS
+    if cred_file and os.path.exists(cred_file):
+        _firestore_client = firestore.Client.from_service_account_json(cred_file)
+        logger.info("Connected to Google Cloud Firestore via service account certificate.")
+    elif os.getenv("FIRESTORE_EMULATOR_HOST"):
         _firestore_client = firestore.Client(project=settings.FIREBASE_PROJECT_ID)
-        logger.info("Connected to Google Cloud Firestore.")
+        logger.info("Connected to Firestore emulator.")
+    elif settings.FIREBASE_CREDENTIALS_PATH or settings.GOOGLE_APPLICATION_CREDENTIALS:
+        _firestore_client = firestore.Client(project=settings.FIREBASE_PROJECT_ID)
+        logger.info("Connected to Google Cloud Firestore via environment credentials.")
 except Exception as e:
     logger.info("Firestore client not connected, local document store will be active: %s", e)
 

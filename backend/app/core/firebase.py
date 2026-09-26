@@ -47,16 +47,23 @@ async def get_current_user(
     elif token:
         raw_token = token.strip()
 
-    if not raw_token:
+    if not raw_token or raw_token.lower() in ("null", "undefined", "none", "[object promise]"):
         raise UnauthorizedError("Missing or malformed Authorization credentials.")
 
     token = raw_token
     
     # Handle dev/test tokens in development environment
     if settings.ENVIRONMENT == "development" and (
-        token.startswith("dev-token-") or token.startswith("test-token-") or token.startswith("test_")
+        token.startswith("dev-token-")
+        or token.startswith("test-token-")
+        or token.startswith("test_")
+        or token.startswith("sd-token-")
     ):
-        uid = token.replace("dev-token-", "").replace("test-token-", "").replace("test_", "")
+        uid = token
+        for prefix in ("dev-token-", "test-token-", "sd-token-", "test_"):
+            if uid.startswith(prefix):
+                uid = uid[len(prefix):]
+                break
         is_dev = "admin" in token.lower()
         return {
             "uid": uid or "dev_user_earth_analyst_01",
@@ -79,5 +86,30 @@ async def get_current_user(
             "is_dev": False
         }
     except Exception as e:
-        logger.error("Firebase token verification failed: %s", e)
-        raise UnauthorizedError(f"Invalid Firebase ID token: {str(e)}")
+        err_msg = str(e)
+        logger.warning("Firebase token verification failed: %s", err_msg)
+        # In development mode, gracefully accept expired real Firebase tokens by extracting claims
+        # so local testing, demonstrations, and development workflows are not disrupted.
+        if settings.ENVIRONMENT == "development" and "expired" in err_msg.lower():
+            try:
+                import json
+                import base64
+                parts = token.split(".")
+                if len(parts) >= 2:
+                    payload_part = parts[1]
+                    payload_part += "=" * (-len(payload_part) % 4)
+                    claims = json.loads(base64.urlsafe_b64decode(payload_part.encode("utf-8")))
+                    uid = claims.get("user_id") or claims.get("sub") or claims.get("uid")
+                    if uid:
+                        logger.info("Development mode: Gracefully accepting expired session token for user %s", uid)
+                        return {
+                            "uid": uid,
+                            "email": claims.get("email", f"{uid}@satyadristi.org"),
+                            "name": claims.get("name", "User"),
+                            "picture": claims.get("picture", ""),
+                            "is_dev": True
+                        }
+            except Exception as decode_err:
+                logger.debug("Failed to extract claims from expired token: %s", decode_err)
+
+        raise UnauthorizedError(f"Invalid Firebase ID token: {err_msg}")

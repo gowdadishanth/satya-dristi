@@ -36,11 +36,11 @@ class TaskRouter:
             return "Scene Description", "VQA Specialist", "scene_description"
 
         # Mode overrides and intent analysis
-        if mode == "temporal" or has_temporal_pair or any(k in q for k in ["change", "between these two", "increased", "decreased", "growth", "before and after"]):
-            return "Bi-Temporal Change", "Change Understanding · Grounding", "bi_temporal_change"
-
-        if mode == "fusion" or has_optical_sar_pair or any(k in q for k in ["sar", "optical and sar", "fusion", "radar"]):
+        if mode == "fusion" or has_optical_sar_pair or any(k in q for k in ["sar", "optical and sar", "fusion", "radar", "backscatter"]):
             return "Optical + SAR Fusion", "Optical Encoder · SAR Encoder · Fusion", "optical_sar_analysis"
+
+        if (mode == "temporal" or has_temporal_pair or any(k in q for k in ["change", "between these two", "increased", "decreased", "growth", "before and after"])) and not has_optical_sar_pair:
+            return "Bi-Temporal Change", "Change Understanding · Grounding", "bi_temporal_change"
 
         if any(k in q for k in ["highlight", "locate", "where is", "bounding box", "find the", "point out", "delineate"]):
             return "Grounding", "Grounding · Localization Specialist", "grounding"

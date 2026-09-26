@@ -62,6 +62,70 @@ export function Settings() {
             />
           </Panel>
         </div>
+
+        {/* Active Color Palette: Color scheme 49: Slate Showcase */}
+        <div className="mt-5">
+          <Panel className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Eyebrow>Active Color System</Eyebrow>
+                <h4 className="mt-1 text-[14px] font-semibold text-foreground">Color Scheme 49: Slate</h4>
+              </div>
+              <span className="mono rounded bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                Active Palette
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              Vibrant pastel mint and emerald slate green balanced against neutral mineral slate grays for geospatial Earth observation intelligence.
+            </p>
+            <div className="mt-3.5 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+              <div className="overflow-hidden rounded-lg border border-border bg-card p-3 shadow-xs">
+                <div className="h-9 rounded-md bg-[#bebebe] shadow-inner" />
+                <div className="mt-2 text-left">
+                  <div className="text-[12px] font-semibold text-foreground">Light Slate</div>
+                  <div className="mono text-[11px] text-muted-foreground">#BEBEBE</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">Silver Label / Text</div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-border bg-card p-3 shadow-xs">
+                <div className="h-9 rounded-md bg-[#79ed91] shadow-inner" />
+                <div className="mt-2 text-left">
+                  <div className="text-[12px] font-semibold text-foreground">Pastel Mint</div>
+                  <div className="mono text-[11px] text-muted-foreground">#79ED91</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">Vibrant Accent &amp; Verified</div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-border bg-card p-3 shadow-xs">
+                <div className="h-9 rounded-md bg-[#4dbe55] shadow-inner" />
+                <div className="mt-2 text-left">
+                  <div className="text-[12px] font-semibold text-foreground">Emerald Slate</div>
+                  <div className="mono text-[11px] text-muted-foreground">#4DBE55</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">Primary Action CTA</div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-border bg-card p-3 shadow-xs">
+                <div className="h-9 rounded-md bg-[#71776d] shadow-inner" />
+                <div className="mt-2 text-left">
+                  <div className="text-[12px] font-semibold text-foreground">Mineral Slate</div>
+                  <div className="mono text-[11px] text-muted-foreground">#71776D</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">Grounding Baseline</div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-border bg-card p-3 shadow-xs">
+                <div className="h-9 rounded-md bg-[#698696] shadow-inner" />
+                <div className="mt-2 text-left">
+                  <div className="text-[12px] font-semibold text-foreground">Slate Blue-Grey</div>
+                  <div className="mono text-[11px] text-muted-foreground">#698696</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">SAR Radar / Water</div>
+                </div>
+              </div>
+            </div>
+          </Panel>
+        </div>
       </section>
 
       {/* Analysis preferences */}
@@ -164,17 +228,17 @@ function KV({ k, v }: { k: string; v: string }) {
   );
 }
 
-/* Miniature live preview of each theme, using the real palette */
+/* Miniature live preview of each theme, using the Color scheme 49: Slate palette */
 function ThemePreview({ surface }: { surface: Surface }) {
   const card =
     surface === "neo"
-      ? "bg-[#f6f3ed] rounded-xl border border-white/60 shadow-[3px_3px_7px_rgba(60,68,95,0.16),-3px_-3px_7px_rgba(255,255,255,0.85)]"
-      : "bg-white rounded-md border border-[#e2ded4]";
+      ? "bg-[#161c1a] rounded-xl border border-[#283630] shadow-[3px_3px_7px_rgba(0,0,0,0.6)]"
+      : "bg-[#161c1a] rounded-md border border-[#283630]";
   return (
-    <div className="rounded-md bg-[#f6f3ed] p-3">
+    <div className="rounded-md bg-[#101413] p-3 border border-[#283630]">
       <div className="flex gap-2">
         <div className={cn("h-9 flex-1", card)} />
-        <div className="h-9 w-9 rounded-md bg-[#313851]" />
+        <div className="h-9 w-9 rounded-md bg-[#4dbe55]" />
       </div>
       <div className={cn("mt-2 h-6", card)} />
     </div>

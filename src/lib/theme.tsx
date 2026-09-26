@@ -21,7 +21,7 @@ function prefersDark() {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [surface, setSurface] = useState<Surface>("default");
-  const [appearance, setAppearance] = useState<Appearance>("light");
+  const [appearance, setAppearance] = useState<Appearance>("dark");
   const [density, setDensity] = useState<Density>("comfortable");
 
   useEffect(() => {

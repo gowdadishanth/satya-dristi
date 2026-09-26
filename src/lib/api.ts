@@ -1,19 +1,36 @@
+import { authService, isJwtExpired } from "./firebase";
+
 /**
  * Satya Dristi API Client Service Layer
  * Connects frontend directly to the FastAPI backend.
  */
 
-const API_BASE = "/api/v1";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
-function getAuthToken(): string | null {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem("sd_auth_token") || null;
+export async function getAuthToken(forceRefresh = false): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  const cached = localStorage.getItem("sd_auth_token");
+  if (!forceRefresh && cached && !isJwtExpired(cached, 30)) {
+    return cached;
   }
-  return null;
+  try {
+    const token = await authService.getIdToken(forceRefresh);
+    if (token && !isJwtExpired(token, 0)) {
+      return token;
+    }
+  } catch (err) {
+    console.warn("Failed to refresh token via authService:", err);
+  }
+  if (cached && isJwtExpired(cached, 0)) {
+    console.warn("Cached token expired and refresh failed. Clearing stale token.");
+    localStorage.removeItem("sd_auth_token");
+    return null;
+  }
+  return cached;
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getAuthToken();
+async function request<T>(endpoint: string, options: RequestInit = {}, retryCount = 0): Promise<T> {
+  const token = await getAuthToken(false);
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {}),
   };
@@ -31,6 +48,19 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers,
   });
 
+  // Automatically refresh and retry once if 401 Unauthorized occurs
+  if (res.status === 401 && retryCount === 0) {
+    console.info("Received 401 response; attempting token refresh and retry...");
+    const freshToken = await getAuthToken(true);
+    if (freshToken && freshToken !== token) {
+      const retryHeaders = {
+        ...headers,
+        Authorization: `Bearer ${freshToken}`,
+      };
+      return request<T>(endpoint, { ...options, headers: retryHeaders }, retryCount + 1);
+    }
+  }
+
   if (!res.ok) {
     let errorDetail = `API request failed (${res.status})`;
     try {
@@ -45,6 +75,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     } catch {
       // Do not attempt to consume the response body again
     }
+
+    // Convert raw Firebase expired error into friendly message if it escaped
+    if (errorDetail.includes("Token expired") || errorDetail.includes("Invalid Firebase ID token")) {
+      errorDetail = "Your session has expired. Please sign in again with Google to continue.";
+    }
+
     throw new Error(errorDetail);
   }
 
@@ -131,6 +167,9 @@ export type AnalysisRecord = {
     confidence: number;
     class_name: string;
     geo_bbox?: number[];
+    polygon?: Array<[number, number]>;
+    centroid?: [number, number];
+    pointer?: [number, number, number, number];
   }>;
   aoi?: AOIPreview;
   execution_trace?: Array<{
@@ -200,16 +239,34 @@ export function resolveSafeDownloadFilename(
   return candidate;
 }
 
+export function getAnalysisImageUrl(
+  analysisId: string,
+  type: "primary" | "before" | "after" | "sar" | "evidence"
+): string {
+  const token = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
+  const validToken = token && !isJwtExpired(token, 0) ? token : null;
+  const tokenParam = validToken ? `?token=${encodeURIComponent(validToken)}` : "";
+  if (type === "evidence") {
+    return `${API_BASE}/analyses/${encodeURIComponent(analysisId)}/evidence${tokenParam}`;
+  }
+  return `${API_BASE}/analyses/${encodeURIComponent(analysisId)}/image/${type}${tokenParam}`;
+}
+
 export async function downloadReportPdf(
   reportId: string,
   customFilename?: string
 ): Promise<string> {
-  const token = getAuthToken();
+  const token = await getAuthToken();
   const endpoint = `${API_BASE}/reports/${encodeURIComponent(reportId)}/download`;
+
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
 
   const res = await fetch(endpoint, {
     method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
   });
 
   if (!res.ok) {
@@ -245,24 +302,29 @@ export async function downloadReportPdf(
 
   const blobUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.style.display = "none";
+  link.style.position = "fixed";
+  link.style.top = "-9999px";
+  link.style.left = "-9999px";
+  link.style.opacity = "0";
   link.href = blobUrl;
   link.download = finalFilename;
   link.setAttribute("download", finalFilename);
+  link.rel = "noopener noreferrer";
   document.body.appendChild(link);
   
   try {
-    link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-  } catch {
     link.click();
+  } catch (clickErr) {
+    console.warn("Standard link.click() failed, attempting MouseEvent dispatch", clickErr);
+    link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
   }
-  link.remove();
 
   setTimeout(() => {
     try {
+      link.remove();
       URL.revokeObjectURL(blobUrl);
     } catch {}
-  }, 60000);
+  }, 1000);
 
   return finalFilename;
 }
@@ -271,12 +333,17 @@ export async function downloadReportJson(
   reportId: string,
   customFilename?: string
 ): Promise<string> {
-  const token = getAuthToken();
+  const token = await getAuthToken();
   const endpoint = `${API_BASE}/reports/${encodeURIComponent(reportId)}/json`;
+
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
 
   const res = await fetch(endpoint, {
     method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
   });
 
   if (!res.ok) {
@@ -311,24 +378,29 @@ export async function downloadReportJson(
 
   const blobUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.style.display = "none";
+  link.style.position = "fixed";
+  link.style.top = "-9999px";
+  link.style.left = "-9999px";
+  link.style.opacity = "0";
   link.href = blobUrl;
   link.download = finalFilename;
   link.setAttribute("download", finalFilename);
+  link.rel = "noopener noreferrer";
   document.body.appendChild(link);
 
   try {
-    link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-  } catch {
     link.click();
+  } catch (clickErr) {
+    console.warn("Standard link.click() failed, attempting MouseEvent dispatch", clickErr);
+    link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
   }
-  link.remove();
 
   setTimeout(() => {
     try {
+      link.remove();
       URL.revokeObjectURL(blobUrl);
     } catch {}
-  }, 60000);
+  }, 1000);
 
   return finalFilename;
 }

@@ -22,9 +22,41 @@ const PRESETS = [
   { name: "Rotterdam", fullName: "Rotterdam Port", lat: 51.924, lon: 4.477, zoom: 12 },
 ];
 
+export const WAYBACK_YEAR_RELEASES: Record<number, string> = {
+  2014: "5844",
+  2015: "28163",
+  2016: "18966",
+  2017: "25521",
+  2018: "23448",
+  2019: "4756",
+  2020: "29260",
+  2021: "26120",
+  2022: "45134",
+  2023: "56102",
+  2024: "16453",
+  2025: "13192",
+  2026: "26334",
+};
+
+export function getWaybackTileUrl(targetYear: number): string {
+  const releaseId = WAYBACK_YEAR_RELEASES[targetYear] || WAYBACK_YEAR_RELEASES[2024];
+  return `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/${releaseId}/{z}/{y}/{x}`;
+}
+
+export const isSarScene = (s?: { sensor?: string; collection?: string; platform?: string; scene_id?: string } | null): boolean => {
+  if (!s) return false;
+  const sensor = (s.sensor || "").toLowerCase();
+  const col = (s.collection || "").toLowerCase();
+  const plat = (s.platform || "").toLowerCase();
+  const id = (s.scene_id || "").toLowerCase();
+  return sensor.includes("sar") || col.includes("sentinel-1") || col.includes("grd") || plat.includes("sentinel-1") || id.startsWith("s1");
+};
+
 export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const baseTileLayerRef = useRef<L.TileLayer | null>(null);
+  const sceneOverlayRef = useRef<L.ImageOverlay | null>(null);
   const aoiLayerRef = useRef<L.Rectangle | null>(null);
   const footprintsLayerRef = useRef<L.LayerGroup | null>(null);
   const clickMarkerRef = useRef<L.CircleMarker | null>(null);
@@ -39,10 +71,16 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   const [sensor, setSensor] = useState<"optical" | "sar">("optical");
   const [cloudCoverMax, setCloudCoverMax] = useState<number>(30);
 
-  // Dual-scene filter state for temporal mode
-  const [temporalTarget, setTemporalTarget] = useState<"before" | "after">("after");
-  const [beforeYear, setBeforeYear] = useState<number>(2022);
+  // Dual-scene filter state for temporal mode (default Baseline: 2019, Target: 2024)
+  const [temporalTarget, setTemporalTarget] = useState<"before" | "after">("before");
+  const [beforeYear, setBeforeYear] = useState<number>(2019);
   const [afterYear, setAfterYear] = useState<number>(2024);
+  const [beforeScenes, setBeforeScenes] = useState<Scene[]>([]);
+  const [afterScenes, setAfterScenes] = useState<Scene[]>([]);
+  // Dual-scene filter state for fusion mode
+  const [fusionTarget, setFusionTarget] = useState<"optical" | "sar">("optical");
+  const [sarScenes, setSarScenes] = useState<Scene[]>([]);
+  const [showSceneOverlay, setShowSceneOverlay] = useState<boolean>(true);
 
   // Scene & AOI State
   const [scenes, setScenes] = useState<Scene[]>([]);
@@ -57,15 +95,55 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   // Request sequence tracking to discard stale concurrent preview requests
   const aoiRequestIdRef = useRef<number>(0);
 
-  // Clear scene selections whenever active analysis mode changes (Single vs Temporal vs Fusion)
+  // When active analysis mode changes, preserve primary AOI and scene selection
+  // so dynamic AI query routing does not wipe out the user's selected map region
   useEffect(() => {
-    setSelectedScene(null);
-    setSecondaryScene(null);
-    setScenes([]);
-    if (footprintsLayerRef.current) {
-      footprintsLayerRef.current.clearLayers();
+    if (mode === "single") {
+      setSecondaryScene(null);
     }
   }, [mode]);
+
+  // Active viewing year on the map
+  const activeViewingYear = mode === "temporal"
+    ? (temporalTarget === "before" ? beforeYear : afterYear)
+    : year;
+
+  // Active scene for current view
+  const activeScene = mode === "temporal"
+    ? (temporalTarget === "before" ? secondaryScene : selectedScene)
+    : selectedScene;
+
+  // Dynamically update map's satellite tile layer when viewing year changes
+  useEffect(() => {
+    if (!mapRef.current || !baseTileLayerRef.current) return;
+    const tileUrl = getWaybackTileUrl(activeViewingYear);
+    baseTileLayerRef.current.setUrl(tileUrl);
+  }, [activeViewingYear]);
+
+  // Overlay authentic satellite scene quicklook when available
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (sceneOverlayRef.current) {
+      mapRef.current.removeLayer(sceneOverlayRef.current);
+      sceneOverlayRef.current = null;
+    }
+
+    if (showSceneOverlay && activeScene?.preview_url && activeScene.bbox && activeScene.bbox.length === 4) {
+      const bounds = L.latLngBounds(
+        [activeScene.bbox[1], activeScene.bbox[0]],
+        [activeScene.bbox[3], activeScene.bbox[2]]
+      );
+      try {
+        sceneOverlayRef.current = L.imageOverlay(activeScene.preview_url, bounds, {
+          opacity: 0.85,
+          interactive: false,
+        }).addTo(mapRef.current);
+      } catch (err) {
+        console.warn("Failed to overlay scene preview:", err);
+      }
+    }
+  }, [activeScene, showSceneOverlay]);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -75,21 +153,38 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       center: [17.424, 78.474],
       zoom: 12,
       zoomControl: false,
+      worldCopyJump: true,
+      maxBounds: [
+        [-85.0511, -180],
+        [85.0511, 180],
+      ],
+      maxBoundsViscosity: 1.0,
     });
 
-    // Satellite imagery base tiles (Esri World Imagery)
-    L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "Tiles © Esri",
+    // Satellite imagery base tiles (Esri Wayback for chosen active observation year)
+    const initialYear = mode === "temporal" ? (temporalTarget === "before" ? beforeYear : afterYear) : year;
+    const tileLayer = L.tileLayer(getWaybackTileUrl(initialYear), {
+      attribution: `Satellite Tiles © Esri Wayback (${initialYear})`,
       maxZoom: 18,
     }).addTo(map);
+    baseTileLayerRef.current = tileLayer;
 
     footprintsLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
+    // Track map center movement to keep coordinates accurately updated and wrapped
+    map.on("moveend", () => {
+      const center = map.getCenter().wrap();
+      const lat = Number(Math.max(-85, Math.min(85, center.lat)).toFixed(4));
+      const lon = Number(((((center.lng + 180) % 360 + 360) % 360) - 180).toFixed(4));
+      setCurrentCoords({ lat, lon });
+    });
+
     // Click anywhere on map to select location
     map.on("click", async (e: L.LeafletMouseEvent) => {
-      const lat = Number(e.latlng.lat.toFixed(4));
-      const lon = Number(e.latlng.lng.toFixed(4));
+      const wrapped = e.latlng.wrap();
+      const lat = Number(Math.max(-85, Math.min(85, wrapped.lat)).toFixed(4));
+      const lon = Number(((((wrapped.lng + 180) % 360 + 360) % 360) - 180).toFixed(4));
       setCurrentCoords({ lat, lon });
 
       if (clickMarkerRef.current) {
@@ -97,15 +192,19 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       }
       clickMarkerRef.current = L.circleMarker([lat, lon], {
         radius: 5,
-        color: "#ab7c2c",
-        fillColor: "#f6f3ed",
-        fillOpacity: 0.9,
+        color: "#4dbe55",
+        fillColor: "#79ed91",
+        fillOpacity: 0.95,
       }).addTo(map);
 
-      // Center AOI box around clicked point
+      // Center AOI box around clicked point with strict WGS84 containment
       const dLat = 0.03;
       const dLon = 0.03;
-      const newBounds = L.latLngBounds([lat - dLat, lon - dLon], [lat + dLat, lon + dLon]);
+      const south = Math.max(-85, lat - dLat);
+      const north = Math.min(85, lat + dLat);
+      const west = Math.max(-180, lon - dLon);
+      const east = Math.min(180, lon + dLon);
+      const newBounds = L.latLngBounds([south, west], [north, east]);
       createAoiFromBounds(newBounds);
 
       // Reverse geocode to get human place name
@@ -130,6 +229,8 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
     return () => {
       map.remove();
       mapRef.current = null;
+      baseTileLayerRef.current = null;
+      sceneOverlayRef.current = null;
     };
   }, []);
 
@@ -144,6 +245,9 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
     setSelectedScene(null);
     setSecondaryScene(null);
     setScenes([]);
+    setBeforeScenes([]);
+    setAfterScenes([]);
+    setSarScenes([]);
     if (footprintsLayerRef.current) {
       footprintsLayerRef.current.clearLayers();
     }
@@ -152,21 +256,51 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       mapRef.current.removeLayer(aoiLayerRef.current);
     }
 
-    const rect = L.rectangle(bounds, {
-      color: "#ab7c2c",
+    // Strict WGS84 range validation & normalization to prevent -180/+180 overflow from Leaflet
+    const normalizeLng = (lng: number) => {
+      let l = (((lng + 180) % 360 + 360) % 360) - 180;
+      if (l === -180 && lng > 0) l = 180;
+      return l;
+    };
+    const clampLat = (lat: number) => Math.max(-85.0511, Math.min(85.0511, lat));
+
+    let west = bounds.getWest();
+    let east = bounds.getEast();
+    let south = clampLat(bounds.getSouth());
+    let north = clampLat(bounds.getNorth());
+
+    if (west < -180 || west > 180 || east < -180 || east > 180) {
+      west = normalizeLng(west);
+      east = normalizeLng(east);
+    }
+    if (west >= east) {
+      if (west > east) {
+        west = Math.max(-180, east - 0.1);
+      } else {
+        west = Math.max(-180, east - 0.05);
+      }
+    }
+    if (south >= north) {
+      north = Math.min(85, south + 0.05);
+    }
+
+    const safeBounds = L.latLngBounds([south, west], [north, east]);
+
+    const rect = L.rectangle(safeBounds, {
+      color: "#4dbe55",
       weight: 2,
       dashArray: "4 4",
-      fillColor: "#ab7c2c",
-      fillOpacity: 0.15,
+      fillColor: "#79ed91",
+      fillOpacity: 0.16,
     }).addTo(mapRef.current);
 
     aoiLayerRef.current = rect;
 
     const bbox = [
-      Number(bounds.getWest().toFixed(4)),
-      Number(bounds.getSouth().toFixed(4)),
-      Number(bounds.getEast().toFixed(4)),
-      Number(bounds.getNorth().toFixed(4)),
+      Number(west.toFixed(4)),
+      Number(south.toFixed(4)),
+      Number(east.toFixed(4)),
+      Number(north.toFixed(4)),
     ];
 
     try {
@@ -183,7 +317,12 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         return;
       }
       setAoi(null);
-      setErrorMsg(err?.message || "Invalid AOI bounds or AOI validation failed.");
+      const rawMsg = err?.message || "";
+      if (rawMsg.includes("Authorization") || rawMsg.includes("UNAUTHORIZED")) {
+        setErrorMsg("Session expired or authentication required. Please sign in to query satellite imagery.");
+      } else {
+        setErrorMsg(rawMsg || "Invalid AOI bounds or AOI validation failed.");
+      }
       if (aoiLayerRef.current && mapRef.current) {
         mapRef.current.removeLayer(aoiLayerRef.current);
         aoiLayerRef.current = null;
@@ -216,23 +355,139 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   };
 
   // Search Real Satellite Scenes from Backend STAC
+  // Search Real Satellite Scenes from Backend STAC
   const handleSearchScenes = async () => {
     if (!aoi) return;
     setSearching(true);
     setErrorMsg(null);
 
-    const activeYear = mode === "temporal"
-      ? (temporalTarget === "before" ? beforeYear : afterYear)
-      : year;
-
     const targetSensor = mode === "fusion"
       ? sensor
       : (sensor === "sar" ? "sar" : "optical");
 
+    if (mode === "temporal") {
+      try {
+        const [foundBefore, foundAfter] = await Promise.all([
+          api.earth.searchScenes({
+            bbox: aoi.bbox,
+            year: beforeYear,
+            sensor: targetSensor,
+            cloud_cover_max: targetSensor === "optical" ? cloudCoverMax : undefined,
+            limit: 6,
+          }),
+          api.earth.searchScenes({
+            bbox: aoi.bbox,
+            year: afterYear,
+            sensor: targetSensor,
+            cloud_cover_max: targetSensor === "optical" ? cloudCoverMax : undefined,
+            limit: 6,
+          }),
+        ]);
+
+        setBeforeScenes(foundBefore);
+        setAfterScenes(foundAfter);
+
+        const bestBefore = foundBefore[0] || null;
+        const bestAfter = foundAfter[0] || null;
+
+        if (bestBefore) setSecondaryScene(bestBefore);
+        if (bestAfter) setSelectedScene(bestAfter);
+
+        if (bestAfter && aoi) {
+          onSelectSceneAndAOI(bestAfter, aoi, bestBefore || undefined);
+        } else if (bestBefore && aoi) {
+          onSelectSceneAndAOI(bestBefore, aoi, undefined);
+        }
+
+        // Render footprints on map
+        if (footprintsLayerRef.current && mapRef.current) {
+          footprintsLayerRef.current.clearLayers();
+          [...foundBefore, ...foundAfter].forEach((s) => {
+            if (s.bbox && s.bbox.length === 4) {
+              const b = L.latLngBounds([s.bbox[1], s.bbox[0]], [s.bbox[3], s.bbox[2]]);
+              const isAfter = s.acquisition_datetime && s.acquisition_datetime.includes(String(afterYear));
+              L.rectangle(b, {
+                color: isAfter ? "#79ed91" : "#698696",
+                weight: 1,
+                dashArray: "2 2",
+                fillOpacity: 0.08,
+              }).addTo(footprintsLayerRef.current!);
+            }
+          });
+        }
+      } catch (err: any) {
+        setErrorMsg(err.message || "No satellite scenes found for the selected years.");
+        setBeforeScenes([]);
+        setAfterScenes([]);
+      } finally {
+        setSearching(false);
+      }
+      return;
+    }
+
+    if (mode === "fusion") {
+      try {
+        const [foundOptical, foundSar] = await Promise.all([
+          api.earth.searchScenes({
+            bbox: aoi.bbox,
+            year: year,
+            sensor: "optical",
+            cloud_cover_max: cloudCoverMax,
+            limit: 6,
+          }),
+          api.earth.searchScenes({
+            bbox: aoi.bbox,
+            year: year,
+            sensor: "sar",
+            limit: 6,
+          }),
+        ]);
+
+        setScenes(foundOptical);
+        setSarScenes(foundSar);
+
+        const bestOpt = foundOptical[0] || null;
+        const bestSar = foundSar[0] || null;
+
+        if (bestOpt) setSelectedScene(bestOpt);
+        if (bestSar) setSecondaryScene(bestSar);
+
+        if (bestOpt && aoi) {
+          onSelectSceneAndAOI(bestOpt, aoi, bestSar || undefined);
+        } else if (bestSar && aoi) {
+          onSelectSceneAndAOI(bestSar, aoi, undefined);
+        }
+
+        // Render footprints on map: optical in green, sar in slate-blue
+        if (footprintsLayerRef.current && mapRef.current) {
+          footprintsLayerRef.current.clearLayers();
+          [...foundOptical, ...foundSar].forEach((s) => {
+            if (s.bbox && s.bbox.length === 4) {
+              const b = L.latLngBounds([s.bbox[1], s.bbox[0]], [s.bbox[3], s.bbox[2]]);
+              const isSar = isSarScene(s);
+              L.rectangle(b, {
+                color: isSar ? "#698696" : "#79ed91",
+                weight: 1,
+                dashArray: "2 2",
+                fillOpacity: 0.08,
+              }).addTo(footprintsLayerRef.current!);
+            }
+          });
+        }
+      } catch (err: any) {
+        setErrorMsg(err.message || "No satellite scenes found for the selected area.");
+        setScenes([]);
+        setSarScenes([]);
+      } finally {
+        setSearching(false);
+      }
+      return;
+    }
+
     try {
       const found = await api.earth.searchScenes({
         bbox: aoi.bbox,
-        year: activeYear,
+        year: year,
         sensor: targetSensor,
         cloud_cover_max: targetSensor === "optical" ? cloudCoverMax : undefined,
         limit: 8,
@@ -241,20 +496,9 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       setScenes(found);
 
       if (found.length > 0) {
-        if (mode === "temporal") {
-          if (temporalTarget === "before") {
-            setSecondaryScene(found[0]);
-          } else {
-            setSelectedScene(found[0]);
-          }
-        } else if (mode === "fusion") {
-          if (targetSensor === "optical") {
-            setSelectedScene(found[0]);
-          } else {
-            setSecondaryScene(found[0]);
-          }
-        } else {
-          setSelectedScene(found[0]);
+        setSelectedScene(found[0]);
+        if (aoi) {
+          onSelectSceneAndAOI(found[0], aoi);
         }
       }
 
@@ -265,10 +509,10 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
           if (s.bbox && s.bbox.length === 4) {
             const b = L.latLngBounds([s.bbox[1], s.bbox[0]], [s.bbox[3], s.bbox[2]]);
             L.rectangle(b, {
-              color: s.sensor.includes("sar") || s.collection.includes("sar") ? "#4f6f8a" : "#ab7c2c",
+              color: isSarScene(s) ? "#698696" : "#79ed91",
               weight: 1,
               dashArray: "2 2",
-              fillOpacity: 0.05,
+              fillOpacity: 0.08,
             }).addTo(footprintsLayerRef.current!);
           }
         });
@@ -290,20 +534,20 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
     let tempRect: L.Rectangle | null = null;
 
     const onMouseDown = (e: L.LeafletMouseEvent) => {
-      startLatLng = e.latlng;
+      startLatLng = e.latlng.wrap();
       if (tempRect && mapRef.current) mapRef.current.removeLayer(tempRect);
       mapRef.current?.dragging.disable();
     };
 
     const onMouseMove = (e: L.LeafletMouseEvent) => {
       if (!startLatLng || !mapRef.current) return;
-      const currentBounds = L.latLngBounds(startLatLng, e.latlng);
+      const currentBounds = L.latLngBounds(startLatLng, e.latlng.wrap());
       if (!tempRect) {
         tempRect = L.rectangle(currentBounds, {
-          color: "#ab7c2c",
+          color: "#4dbe55",
           weight: 2,
           dashArray: "4 4",
-          fillColor: "#ab7c2c",
+          fillColor: "#79ed91",
           fillOpacity: 0.2,
         }).addTo(mapRef.current);
       } else {
@@ -313,7 +557,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
 
     const onMouseUp = (e: L.LeafletMouseEvent) => {
       if (!startLatLng || !mapRef.current) return;
-      const finalBounds = L.latLngBounds(startLatLng, e.latlng);
+      const finalBounds = L.latLngBounds(startLatLng, e.latlng.wrap());
       if (tempRect) mapRef.current.removeLayer(tempRect);
       createAoiFromBounds(finalBounds);
       mapRef.current.dragging.enable();
@@ -331,6 +575,9 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
 
   const clearAoi = () => {
     if (mapRef.current) {
+      setLocationName("Hyderabad, Telangana");
+      setCurrentCoords({ lat: 17.424, lon: 78.474 });
+      mapRef.current.setView([17.424, 78.474], 12);
       createAoiFromBounds(mapRef.current.getBounds().pad(-0.25));
     }
   };
@@ -339,8 +586,8 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
     if (mode === "temporal") {
       if (temporalTarget === "before") {
         setSecondaryScene(scene);
-        if (selectedScene && aoi) {
-          onSelectSceneAndAOI(selectedScene, aoi, scene);
+        if (aoi) {
+          onSelectSceneAndAOI(selectedScene || scene, aoi, scene);
         }
       } else {
         setSelectedScene(scene);
@@ -349,11 +596,13 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         }
       }
     } else if (mode === "fusion") {
-      const isSar = scene.sensor.includes("sar") || scene.collection.includes("sar");
-      if (isSar) {
+      const isSar = isSarScene(scene);
+      if (fusionTarget === "sar" || isSar) {
         setSecondaryScene(scene);
         if (selectedScene && aoi) {
           onSelectSceneAndAOI(selectedScene, aoi, scene);
+        } else if (aoi) {
+          onSelectSceneAndAOI(scene, aoi, undefined);
         }
       } else {
         setSelectedScene(scene);
@@ -396,7 +645,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         {/* ROW 1: Location Search (Dominant) + Year + Sensor */}
         <div className="grid gap-2 sm:grid-cols-12">
           {/* Dominant Location Search Input */}
-          <form onSubmit={handleSearchLocation} className="relative sm:col-span-6 lg:col-span-6">
+          <form onSubmit={handleSearchLocation} className={cn("relative", mode === "temporal" ? "sm:col-span-12 md:col-span-5" : "sm:col-span-12 md:col-span-6")}>
             <IconSearch className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               value={searchQuery}
@@ -406,26 +655,54 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
             />
           </form>
 
-          {/* Year Dropdown (2016 - 2026) */}
-          <div className="sm:col-span-3 lg:col-span-3 flex items-center justify-between gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 min-w-[105px]">
-            <span className="mono text-[11px] uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-              {mode === "temporal" ? (temporalTarget === "before" ? "Pre:" : "Post:") : "Year:"}
-            </span>
-            {mode === "temporal" ? (
-              <select
-                value={temporalTarget === "before" ? beforeYear : afterYear}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  if (temporalTarget === "before") setBeforeYear(val);
-                  else setAfterYear(val);
-                }}
-                className="w-full bg-transparent text-[13px] font-medium outline-none text-foreground cursor-pointer"
-              >
-                {[2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016].map((y) => (
-                  <option key={y} value={y} className="bg-card text-foreground">{y}</option>
-                ))}
-              </select>
-            ) : (
+          {/* Year Dropdowns */}
+          {mode === "temporal" ? (
+            <>
+              {/* Before Year Selector */}
+              <div className="sm:col-span-6 md:col-span-2 flex items-center justify-between gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 min-w-[105px]">
+                <span className="mono text-[11px] uppercase tracking-wide font-semibold text-primary whitespace-nowrap">
+                  Before:
+                </span>
+                <select
+                  value={beforeYear}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setBeforeYear(val);
+                    setTemporalTarget("before");
+                  }}
+                  className="w-full bg-transparent text-[13px] font-medium outline-none text-foreground cursor-pointer"
+                >
+                  {[2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016].map((y) => (
+                    <option key={y} value={y} className="bg-card text-foreground">{y}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* After Year Selector */}
+              <div className="sm:col-span-6 md:col-span-2 flex items-center justify-between gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 min-w-[105px]">
+                <span className="mono text-[11px] uppercase tracking-wide font-semibold text-accent whitespace-nowrap">
+                  After:
+                </span>
+                <select
+                  value={afterYear}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setAfterYear(val);
+                    setTemporalTarget("after");
+                  }}
+                  className="w-full bg-transparent text-[13px] font-medium outline-none text-foreground cursor-pointer"
+                >
+                  {[2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016].map((y) => (
+                    <option key={y} value={y} className="bg-card text-foreground">{y}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          ) : (
+            <div className="sm:col-span-6 md:col-span-3 flex items-center justify-between gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 min-w-[105px]">
+              <span className="mono text-[11px] uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                Year:
+              </span>
               <select
                 value={year}
                 onChange={(e) => setYear(Number(e.target.value))}
@@ -435,32 +712,39 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
                   <option key={y} value={y} className="bg-card text-foreground">{y}</option>
                 ))}
               </select>
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* Sensor Selector */}
-          <div className="sm:col-span-3 lg:col-span-3 flex rounded-md border border-border bg-card p-0.5">
-            <button
-              type="button"
-              onClick={() => setSensor("optical")}
-              className={cn(
-                "flex-1 rounded px-2.5 py-1 text-[12px] font-medium transition-colors",
-                sensor === "optical" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:bg-muted"
-              )}
-            >
-              Sentinel-2 Optical
-            </button>
-            <button
-              type="button"
-              onClick={() => setSensor("sar")}
-              className={cn(
-                "flex-1 rounded px-2.5 py-1 text-[12px] font-medium transition-colors",
-                sensor === "sar" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:bg-muted"
-              )}
-            >
-              Sentinel-1 SAR
-            </button>
-          </div>
+          {/* Sensor Selector / Fusion Mode Pill */}
+          {mode === "fusion" ? (
+            <div className="sm:col-span-12 md:col-span-3 flex items-center justify-center rounded-md border border-accent/40 bg-accent/10 px-2 py-1.5 text-[11.5px] font-semibold text-foreground gap-1.5 shadow-xs">
+              <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
+              <span>Multimodal: Optical + SAR</span>
+            </div>
+          ) : (
+            <div className={cn("flex rounded-md border border-border bg-card p-0.5", mode === "temporal" ? "sm:col-span-12 md:col-span-3" : "sm:col-span-12 md:col-span-3")}>
+              <button
+                type="button"
+                onClick={() => setSensor("optical")}
+                className={cn(
+                  "flex-1 rounded px-2.5 py-1 text-[12px] font-medium transition-colors",
+                  sensor === "optical" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:bg-muted"
+                )}
+              >
+                Sentinel-2 Optical
+              </button>
+              <button
+                type="button"
+                onClick={() => setSensor("sar")}
+                className={cn(
+                  "flex-1 rounded px-2.5 py-1 text-[12px] font-medium transition-colors",
+                  sensor === "sar" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:bg-muted"
+                )}
+              >
+                Sentinel-1 SAR
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ROW 2: Cloud Filter + Quick Presets + Search Scenes Action */}
@@ -519,8 +803,20 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       </div>
 
       {errorMsg && (
-        <div className="mono rounded border border-[color:var(--err)]/30 bg-[color:var(--err)]/8 px-3 py-1.5 text-[12px] text-[color:var(--err)]">
-          {errorMsg}
+        <div className="mono rounded border border-[color:var(--err)]/30 bg-[color:var(--err)]/8 px-3 py-2 text-[12px] text-[color:var(--err)] flex items-center justify-between gap-2">
+          <span>{errorMsg}</span>
+          {(errorMsg.toLowerCase().includes("sign in") ||
+            errorMsg.toLowerCase().includes("session") ||
+            errorMsg.toLowerCase().includes("expired") ||
+            errorMsg.toLowerCase().includes("token")) && (
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent("open-auth-modal"))}
+              className="shrink-0 px-2.5 py-1 rounded bg-[color:var(--err)] text-white text-[11px] font-semibold hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+            >
+              Sign In with Google →
+            </button>
+          )}
         </div>
       )}
 
@@ -549,6 +845,8 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
           <button
             onClick={() => {
               if (mapRef.current) {
+                setLocationName("Hyderabad, Telangana");
+                setCurrentCoords({ lat: 17.424, lon: 78.474 });
                 mapRef.current.setView([17.424, 78.474], 12);
                 createAoiFromBounds(mapRef.current.getBounds().pad(-0.25));
               }
@@ -587,121 +885,304 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
             <span>Centroid: {aoi.centroid[1]}° N, {aoi.centroid[0]}° E</span>
           </div>
         )}
+
+        {/* Interactive Observation Year Switcher & Satellite Map Status */}
+        <div className="absolute right-3 top-3 z-[1000] flex flex-col items-end gap-1.5">
+          {mode === "temporal" ? (
+            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-card/95 p-1 shadow-md backdrop-blur">
+              <span className="mono text-[11px] text-muted-foreground pl-2 font-medium">Map View:</span>
+              <div className="flex items-center rounded-md border border-border/80 bg-muted/40 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setTemporalTarget("before")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded px-2.5 py-1 text-[11.5px] font-semibold transition-all cursor-pointer",
+                    temporalTarget === "before"
+                      ? "bg-primary text-primary-foreground shadow-xs ring-1 ring-primary"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title={`View ${beforeYear} Baseline satellite imagery on map`}
+                >
+                  <span>◀ Before ({beforeYear})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemporalTarget("after")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded px-2.5 py-1 text-[11.5px] font-semibold transition-all cursor-pointer",
+                    temporalTarget === "after"
+                      ? "bg-accent text-accent-foreground shadow-xs ring-1 ring-accent"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title={`View ${afterYear} Target satellite imagery on map`}
+                >
+                  <span>After ({afterYear}) ▶</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-md border border-border bg-card/95 px-3 py-1.5 shadow-md backdrop-blur">
+              <span className="mono text-[11px] text-muted-foreground">Map Satellite Year:</span>
+              <Badge tone="accent">{year}</Badge>
+            </div>
+          )}
+
+          {/* Active Satellite Archive Status Tag */}
+          <div className="mono rounded border border-border/80 bg-card/90 px-2.5 py-0.5 text-[10.5px] text-muted-foreground shadow-xs backdrop-blur flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--ok)] animate-pulse" />
+            <span>Active Satellite: <strong className="text-foreground font-semibold">{activeViewingYear} Archive</strong></span>
+            <span className="text-border">·</span>
+            <span className="text-[10px]">Esri Wayback / Sentinel</span>
+          </div>
+        </div>
       </div>
 
       {/* 4. SCENE RESULTS (Spacious Strip / Grid Below the Map) */}
       <div className="rounded-md border border-border bg-card p-3">
-        <div className="flex items-center justify-between border-b border-border pb-2">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between border-b border-border pb-2 gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             <span className="text-[13px] font-semibold">Available Satellite Scenes</span>
-            <span className="mono text-[11px] text-muted-foreground">({scenes.length} found)</span>
+            {mode === "temporal" ? (
+              <div className="flex items-center rounded-md border border-border p-0.5 bg-muted/40">
+                <button
+                  type="button"
+                  onClick={() => setTemporalTarget("before")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors cursor-pointer",
+                    temporalTarget === "before"
+                      ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <span>Baseline / Before ({beforeYear})</span>
+                  <span className="mono text-[10px] opacity-80">({beforeScenes.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemporalTarget("after")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors cursor-pointer",
+                    temporalTarget === "after"
+                      ? "bg-accent text-accent-foreground font-semibold shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <span>Target / After ({afterYear})</span>
+                  <span className="mono text-[10px] opacity-80">({afterScenes.length})</span>
+                </button>
+              </div>
+            ) : mode === "fusion" ? (
+              <div className="flex items-center rounded-md border border-border p-0.5 bg-muted/40">
+                <button
+                  type="button"
+                  onClick={() => setFusionTarget("optical")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors cursor-pointer",
+                    fusionTarget === "optical"
+                      ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <span>Sentinel-2 Optical</span>
+                  <span className="mono text-[10px] opacity-80">({scenes.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFusionTarget("sar")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors cursor-pointer",
+                    fusionTarget === "sar"
+                      ? "bg-accent text-accent-foreground font-semibold shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <span>Sentinel-1 C-SAR</span>
+                  <span className="mono text-[10px] opacity-80">({sarScenes.length})</span>
+                </button>
+              </div>
+            ) : (
+              <span className="mono text-[11px] text-muted-foreground">({scenes.length} found)</span>
+            )}
           </div>
-          <span className="mono text-[11px] text-muted-foreground">
-            {mode === "temporal" ? `Viewing ${temporalTarget.toUpperCase()} catalogue` : `${year} Observations`}
-          </span>
+
+          <div className="flex items-center gap-2 mono text-[11px] text-muted-foreground">
+            {mode === "temporal" ? (
+              <>
+                <span className={secondaryScene ? "text-primary font-medium" : "text-muted-foreground"}>
+                  Before: {secondaryScene ? secondaryScene.acquisition_datetime.slice(0, 10) : "(not selected)"}
+                </span>
+                <span>·</span>
+                <span className={selectedScene ? "text-accent font-medium" : "text-muted-foreground"}>
+                  After: {selectedScene ? selectedScene.acquisition_datetime.slice(0, 10) : "(not selected)"}
+                </span>
+              </>
+            ) : mode === "fusion" ? (
+              <>
+                <span className={selectedScene ? "text-primary font-medium" : "text-muted-foreground"}>
+                  Optical: {selectedScene ? selectedScene.acquisition_datetime.slice(0, 10) : "(not selected)"}
+                </span>
+                <span>·</span>
+                <span className={secondaryScene ? "text-accent font-medium" : "text-muted-foreground"}>
+                  SAR: {secondaryScene ? secondaryScene.acquisition_datetime.slice(0, 10) : "(not selected)"}
+                </span>
+              </>
+            ) : (
+              <span>{year} Observations</span>
+            )}
+          </div>
         </div>
 
         {/* Scene Cards Grid */}
-        <div className="mt-2.5">
-          {scenes.length === 0 ? (
-            <div className="py-8 text-center text-[13px] text-muted-foreground">
-              <p className="font-medium">No satellite scenes queried yet.</p>
-              <p className="mt-1 text-[12px]">Click &ldquo;Search Satellite Scenes&rdquo; to discover real Sentinel-2 and Sentinel-1 scenes for this AOI.</p>
-            </div>
-          ) : (
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-              {scenes.map((s) => {
-                const isSelected = selectedScene?.scene_id === s.scene_id;
-                const isSecond = secondaryScene?.scene_id === s.scene_id;
-                const isSar = s.sensor.includes("sar") || s.collection.includes("sar");
+        {(() => {
+          const displayedScenes = mode === "temporal"
+            ? (temporalTarget === "before" ? beforeScenes : afterScenes)
+            : mode === "fusion"
+            ? (fusionTarget === "optical" ? scenes : sarScenes)
+            : scenes;
 
-                return (
-                  <div
-                    key={s.scene_id}
-                    onClick={() => handleSelectScene(s)}
-                    className={cn(
-                      "cursor-pointer rounded-md border p-2.5 transition-all text-left",
-                      isSelected
-                        ? "border-accent bg-accent/8 ring-1 ring-accent"
-                        : isSecond
-                        ? "border-primary bg-primary/8 ring-1 ring-primary"
-                        : "border-border bg-card hover:border-muted-foreground/50 hover:bg-muted/30"
-                    )}
-                  >
-                    {/* Thumbnail Quicklook */}
-                    {s.preview_url ? (
-                      <div className="relative mb-2 h-20 w-full overflow-hidden rounded bg-black/40 border border-border">
-                        <img
-                          src={s.preview_url}
-                          alt="Scene quicklook"
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                        <span className="mono absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[9.5px] text-white">
-                          10 m/px
-                        </span>
-                      </div>
-                    ) : null}
+          return (
+            <div className="mt-2.5">
+              {displayedScenes.length === 0 ? (
+                <div className="py-8 text-center text-[13px] text-muted-foreground">
+                  <p className="font-medium">
+                    {mode === "temporal"
+                      ? `No ${temporalTarget === "before" ? "Baseline (Before)" : "Target (After)"} scenes queried yet.`
+                      : mode === "fusion"
+                      ? `No ${fusionTarget === "optical" ? "Sentinel-2 Optical" : "Sentinel-1 SAR"} scenes queried yet.`
+                      : "No satellite scenes queried yet."}
+                  </p>
+                  <p className="mt-1 text-[12px]">
+                    Click &ldquo;Search Satellite Scenes&rdquo; to discover real Sentinel-2 and Sentinel-1 scenes for this AOI.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {displayedScenes.map((s) => {
+                    const isSar = isSarScene(s);
 
-                    {/* Header */}
-                    <div className="flex items-center justify-between gap-1">
-                      <div className="flex items-center gap-1.5">
-                        {isSar ? <IconSar className="h-4 w-4 text-accent" /> : <IconOptical className="h-4 w-4 text-accent" />}
-                        <span className="text-[12.5px] font-semibold text-foreground">
-                          {isSar ? "Sentinel-1 SAR" : "Sentinel-2 L2A"}
-                        </span>
-                      </div>
-                      {isSelected ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[color:var(--ok)]">
-                          <IconCheck className="h-3.5 w-3.5" /> Selected
-                        </span>
-                      ) : isSecond ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary">
-                          <IconCheck className="h-3.5 w-3.5" /> {mode === "temporal" ? "Baseline" : "SAR"}
-                        </span>
-                      ) : null}
-                    </div>
+                    let isSelected = false;
+                    let isSecond = false;
+                    let badgeLabel = "";
+                    let btnLabel = "Select Scene";
 
-                    {/* Metadata */}
-                    <div className="mono mt-2 space-y-1 text-[11.5px] text-muted-foreground">
-                      <div className="flex justify-between">
-                        <span>Acquired:</span>
-                        <span className="font-medium text-foreground">{s.acquisition_datetime.slice(0, 10)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Cloud cover:</span>
-                        <span className="font-medium text-foreground">
-                          {s.cloud_cover !== null ? `${s.cloud_cover}%` : "0% (All-weather)"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between truncate">
-                        <span>Scene ID:</span>
-                        <span className="font-medium text-foreground truncate ml-1">{s.scene_id.slice(0, 16)}…</span>
-                      </div>
-                    </div>
+                    if (mode === "temporal") {
+                      if (temporalTarget === "before") {
+                        isSelected = secondaryScene?.scene_id === s.scene_id;
+                        badgeLabel = isSelected ? "Selected (Before Baseline)" : "";
+                        btnLabel = isSelected ? "Selected as Before Baseline" : "Select as Before Scene";
+                      } else {
+                        isSelected = selectedScene?.scene_id === s.scene_id;
+                        badgeLabel = isSelected ? "Selected (After Target)" : "";
+                        btnLabel = isSelected ? "Selected as After Target" : "Select as After Scene";
+                      }
+                    } else if (mode === "fusion") {
+                      if (fusionTarget === "optical") {
+                        isSelected = selectedScene?.scene_id === s.scene_id;
+                        badgeLabel = isSelected ? "Selected (Optical Primary)" : "";
+                        btnLabel = isSelected ? "Active Optical Primary" : "Select as Optical Scene";
+                      } else {
+                        isSecond = secondaryScene?.scene_id === s.scene_id;
+                        badgeLabel = isSecond ? "Selected (SAR Radar)" : "";
+                        btnLabel = isSecond ? "Active SAR Radar" : "Select as SAR Scene";
+                      }
+                    } else {
+                      isSelected = selectedScene?.scene_id === s.scene_id;
+                      badgeLabel = isSelected ? "Selected" : "";
+                      btnLabel = isSelected ? "Active Scene" : "Select Scene";
+                    }
 
-                    {/* Select Action Button */}
-                    <div className="mt-2.5 border-t border-border/60 pt-2">
-                      <button
-                        type="button"
+                    return (
+                      <div
+                        key={s.scene_id}
+                        onClick={() => handleSelectScene(s)}
                         className={cn(
-                          "w-full rounded py-1 text-[11.5px] font-semibold transition-colors",
+                          "cursor-pointer rounded-md border p-2.5 transition-all text-left",
                           isSelected
-                            ? "bg-accent text-accent-foreground"
+                            ? (mode === "temporal" && temporalTarget === "before"
+                                ? "border-primary bg-primary/8 ring-1 ring-primary"
+                                : "border-accent bg-accent/8 ring-1 ring-accent")
                             : isSecond
-                            ? "bg-primary text-primary-foreground"
-                            : "border border-border text-foreground hover:bg-muted"
+                            ? "border-primary bg-primary/8 ring-1 ring-primary"
+                            : "border-border bg-card hover:border-muted-foreground/50 hover:bg-muted/30"
                         )}
                       >
-                        {isSelected ? "Active Scene" : isSecond ? "Secondary Scene" : "Select Scene"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                        {/* Thumbnail Quicklook */}
+                        {s.preview_url ? (
+                          <div className="relative mb-2 h-20 w-full overflow-hidden rounded bg-black/40 border border-border">
+                            <img
+                              src={s.preview_url}
+                              alt="Scene quicklook"
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                            <span className="mono absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[9.5px] text-white">
+                              10 m/px
+                            </span>
+                          </div>
+                        ) : null}
+
+                        {/* Header */}
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="flex items-center gap-1.5">
+                            {isSar ? <IconSar className="h-4 w-4 text-accent" /> : <IconOptical className="h-4 w-4 text-accent" />}
+                            <span className="text-[12.5px] font-semibold text-foreground">
+                              {isSar ? "Sentinel-1 SAR" : "Sentinel-2 L2A"}
+                            </span>
+                          </div>
+                          {badgeLabel ? (
+                            <span className={cn(
+                              "inline-flex items-center gap-1 text-[11px] font-semibold",
+                              mode === "temporal" && temporalTarget === "before" ? "text-primary" : "text-[color:var(--ok)]"
+                            )}>
+                              <IconCheck className="h-3.5 w-3.5" /> {badgeLabel}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {/* Metadata */}
+                        <div className="mono mt-2 space-y-1 text-[11.5px] text-muted-foreground">
+                          <div className="flex justify-between">
+                            <span>Acquired:</span>
+                            <span className="font-medium text-foreground">{s.acquisition_datetime.slice(0, 10)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Cloud cover:</span>
+                            <span className="font-medium text-foreground">
+                              {s.cloud_cover !== null ? `${s.cloud_cover}%` : "0% (All-weather)"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between truncate">
+                            <span>Scene ID:</span>
+                            <span className="font-medium text-foreground truncate ml-1">{s.scene_id.slice(0, 16)}…</span>
+                          </div>
+                        </div>
+
+                        {/* Select Action Button */}
+                        <div className="mt-2.5 border-t border-border/60 pt-2">
+                          <button
+                            type="button"
+                            className={cn(
+                              "w-full rounded py-1 text-[11.5px] font-semibold transition-colors",
+                              isSelected
+                                ? (mode === "temporal" && temporalTarget === "before"
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-accent text-accent-foreground")
+                                : isSecond
+                                ? "bg-primary text-primary-foreground"
+                                : "border border-border text-foreground hover:bg-muted"
+                            )}
+                          >
+                            {btnLabel}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
       </div>
     </div>
   );

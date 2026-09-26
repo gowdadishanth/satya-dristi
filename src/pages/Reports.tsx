@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Panel, Button, Badge, Eyebrow, cn } from "../components/ui";
 import { SatImage, OverlayChange, OverlayGrounding, REGIONS, OverlayImageLayer } from "../components/SatImage";
-import { analyses as initialAnalyses, type Analysis } from "../lib/data";
 import { ConfBadge, TaskIcon } from "../components/bits";
 import { IconDownload, IconClose, IconTrace, IconCheck, IconTriangle } from "../components/icons";
 import { api, type ReportItem } from "../lib/api";
@@ -12,6 +11,7 @@ export function Reports() {
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const notify = (kind: "ok" | "err", text: string) => {
     setToast({ kind, text });
@@ -20,6 +20,7 @@ export function Reports() {
 
   const loadReports = () => {
     setLoading(true);
+    setError(null);
     api.reports.list()
       .then((data) => {
         if (data && data.length > 0) {
@@ -38,35 +39,18 @@ export function Reports() {
             json_filename: r.json_filename,
           })));
         } else {
-          // Fallback to sample items
-          setReports(initialAnalyses.map((a) => ({
-            id: a.id,
-            analysis_id: a.id,
-            query: a.query,
-            task: a.task,
-            input: a.input,
-            date: a.date,
-            time: a.time,
-            confidence: a.confidence,
-            status: a.status,
-            answer: a.answer,
-          })));
+          setReports([]);
         }
         setLoading(false);
       })
-      .catch(() => {
-        setReports(initialAnalyses.map((a) => ({
-          id: a.id,
-          analysis_id: a.id,
-          query: a.query,
-          task: a.task,
-          input: a.input,
-          date: a.date,
-          time: a.time,
-          confidence: a.confidence,
-          status: a.status,
-          answer: a.answer,
-        })));
+      .catch((err: any) => {
+        setReports([]);
+        const rawMsg = err?.message || "";
+        if (rawMsg.includes("Authorization") || rawMsg.includes("UNAUTHORIZED")) {
+          setError("Authentication required. Please sign in to view verified reports.");
+        } else {
+          setError(rawMsg || "Failed to load reports from server.");
+        }
         setLoading(false);
       });
   };
@@ -114,44 +98,75 @@ export function Reports() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {reports.map((a) => (
-          <Panel key={a.id} className="flex flex-col overflow-hidden p-0">
-            <SatImage bbox={REGIONS.corridor} className="h-28 w-full border-b border-border">
-              {a.task === "Bi-Temporal Change" && <OverlayChange />}
-              {a.task === "Grounding" && <OverlayGrounding />}
-            </SatImage>
-            <div className="flex flex-1 flex-col p-4">
-              <div className="flex items-center gap-2">
-                <TaskIcon task={a.task} className="h-4 w-4 text-muted-foreground" />
-                <span className="mono text-[10.5px] uppercase tracking-wide text-muted-foreground">{a.id}</span>
-                <span className="ml-auto"><ConfBadge level={a.confidence} /></span>
-              </div>
-              <p className="mt-2 line-clamp-2 text-[13.5px] font-medium leading-snug">{a.query}</p>
-              <dl className="mono mt-3 grid grid-cols-2 gap-y-1 text-[10.5px] text-muted-foreground">
-                <dt>Task</dt><dd className="text-right text-foreground">{a.task}</dd>
-                <dt>Input</dt><dd className="text-right text-foreground">{a.input}</dd>
-                <dt>Created</dt><dd className="text-right text-foreground">{a.date}</dd>
-                <dt>Status</dt><dd className="text-right" style={{ color: "var(--ok)" }}>{a.status}</dd>
-              </dl>
-              <div className="mt-4 flex gap-2 border-t border-border pt-3">
-                <Button size="sm" variant="outline" className="flex-1" onClick={() => setOpenId(a.id)}>
-                  View
-                </Button>
-                <Button
-                  size="sm"
-                  variant="accent"
-                  icon={<IconDownload className="h-3.5 w-3.5" />}
-                  disabled={busyId === a.id}
-                  onClick={() => downloadPdf(a)}
-                >
-                  {busyId === a.id ? "…" : "PDF"}
-                </Button>
-              </div>
+      {error && !loading && (
+        <Panel className="p-8 text-center text-[13px] text-[color:var(--err)] space-y-3">
+          <div>{error}</div>
+          {error.toLowerCase().includes("sign in") && (
+            <div>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent("open-auth-modal"))}
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+              >
+                Sign In with Google →
+              </button>
             </div>
-          </Panel>
-        ))}
-      </div>
+          )}
+        </Panel>
+      )}
+
+      {loading && (
+        <Panel className="p-8 text-center text-[13px] text-muted-foreground">
+          Loading verified reports...
+        </Panel>
+      )}
+
+      {!loading && !error && reports.length === 0 && (
+        <Panel className="p-10 text-center text-[13px] text-muted-foreground">
+          No reports generated yet. Run an analysis in the workbench to generate verified reports.
+        </Panel>
+      )}
+
+      {reports.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {reports.map((a) => (
+            <Panel key={a.id} className="flex flex-col overflow-hidden p-0">
+              <SatImage bbox={REGIONS.corridor} className="h-28 w-full border-b border-border">
+                {a.task === "Bi-Temporal Change" && <OverlayChange />}
+                {a.task === "Grounding" && <OverlayGrounding />}
+              </SatImage>
+              <div className="flex flex-1 flex-col p-4">
+                <div className="flex items-center gap-2">
+                  <TaskIcon task={a.task} className="h-4 w-4 text-muted-foreground" />
+                  <span className="mono text-[10.5px] uppercase tracking-wide text-muted-foreground">{a.id}</span>
+                  <span className="ml-auto"><ConfBadge level={a.confidence} /></span>
+                </div>
+                <p className="mt-2 line-clamp-2 text-[13.5px] font-medium leading-snug">{a.query}</p>
+                <dl className="mono mt-3 grid grid-cols-2 gap-y-1 text-[10.5px] text-muted-foreground">
+                  <dt>Task</dt><dd className="text-right text-foreground">{a.task}</dd>
+                  <dt>Input</dt><dd className="text-right text-foreground">{a.input}</dd>
+                  <dt>Created</dt><dd className="text-right text-foreground">{a.date}</dd>
+                  <dt>Status</dt><dd className="text-right" style={{ color: "var(--ok)" }}>{a.status}</dd>
+                </dl>
+                <div className="mt-4 flex gap-2 border-t border-border pt-3">
+                  <Button size="sm" variant="outline" className="flex-1" onClick={() => setOpenId(a.id)}>
+                    View
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="accent"
+                    icon={<IconDownload className="h-3.5 w-3.5" />}
+                    disabled={busyId === a.id}
+                    onClick={() => downloadPdf(a)}
+                  >
+                    {busyId === a.id ? "…" : "PDF"}
+                  </Button>
+                </div>
+              </div>
+            </Panel>
+          ))}
+        </div>
+      )}
 
       {/* Report detail dialog */}
       {report && (

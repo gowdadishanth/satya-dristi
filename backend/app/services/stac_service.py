@@ -88,11 +88,11 @@ class STACService:
         scene_id = feat.get("id", "")
 
         visual_url = None
-        for key in ["visual", "overview", "preview", "quick-look", "thumbnail"]:
+        for key in ["thumbnail", "quick-look", "overview", "preview", "visual", "vv", "vh", "VV", "VH"]:
             if key in assets and assets[key].get("href"):
                 href = assets[key]["href"]
                 if href.startswith("s3://sentinel-s1-l1c/"):
-                    href = href.replace("s3://sentinel-s1-l1c/", "https://sentinel-cogs.s3.us-west-2.amazonaws.com/")
+                    href = href.replace("s3://sentinel-s1-l1c/", "https://sentinel-s1-l1c.s3.amazonaws.com/")
                 if href.startswith("http"):
                     visual_url = href
                     break
@@ -100,6 +100,14 @@ class STACService:
         preview_url = visual_url
 
         polarizations = props.get("sar:polarizations", ["VV", "VH"])
+
+        clean_assets = {}
+        for k, v in assets.items():
+            if v.get("href"):
+                h = v["href"]
+                if h.startswith("s3://sentinel-s1-l1c/"):
+                    h = h.replace("s3://sentinel-s1-l1c/", "https://sentinel-s1-l1c.s3.amazonaws.com/")
+                clean_assets[k] = {"href": h, "type": v.get("type")}
 
         return {
             "scene_id": scene_id,
@@ -116,7 +124,7 @@ class STACService:
             "visual_url": visual_url or preview_url,
             "preview_url": preview_url,
             "available_bands": polarizations,
-            "assets": {k: {"href": v.get("href"), "type": v.get("type")} for k, v in assets.items() if v.get("href")}
+            "assets": clean_assets
         }
 
     async def search_scenes(

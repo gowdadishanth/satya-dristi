@@ -179,6 +179,50 @@ async def get_analysis_evidence_file(
         
     return FileResponse(str(resolved_path), media_type="image/png")
 
+@router.get("/{analysis_id}/image/{image_type}")
+async def get_analysis_image_file(
+    analysis_id: str,
+    image_type: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Returns the primary, before, after, or SAR satellite image for an analysis."""
+    doc = db.get_analysis(analysis_id)
+    if not doc:
+        raise NotFoundError(f"Analysis '{analysis_id}' not found.")
+
+    if not current_user.get("is_dev") and doc.get("uid") != current_user["uid"]:
+        raise ForbiddenError("You are not authorized to access this analysis image.")
+
+    path_map = {
+        "primary": doc.get("primary_image_path"),
+        "after": doc.get("primary_image_path"),
+        "before": doc.get("before_image_path") or doc.get("primary_image_path"),
+        "sar": doc.get("sar_image_path") or doc.get("primary_image_path"),
+        "evidence": doc.get("evidence_path"),
+    }
+
+    img_path = path_map.get(image_type.lower())
+    if not img_path:
+        raise NotFoundError(f"Image of type '{image_type}' not found for analysis.")
+
+    resolved_path = Path(img_path).resolve()
+    base_data_dir = settings.DATA_DIR.resolve()
+    try:
+        resolved_path.relative_to(base_data_dir)
+    except ValueError:
+        raise ForbiddenError("Invalid image path.")
+
+    if not resolved_path.is_file():
+        raise NotFoundError(f"Image file for '{image_type}' does not exist on disk.")
+
+    media_type = "image/png"
+    if resolved_path.suffix.lower() in [".jpg", ".jpeg"]:
+        media_type = "image/jpeg"
+    elif resolved_path.suffix.lower() in [".tif", ".tiff"]:
+        media_type = "image/tiff"
+
+    return FileResponse(str(resolved_path), media_type=media_type)
+
 @router.get("/{analysis_id}/trace")
 async def get_analysis_trace(
     analysis_id: str,

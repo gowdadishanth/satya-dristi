@@ -13,6 +13,7 @@
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-muted: var(--muted);
@@ -22,52 +23,67 @@
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-err: var(--err);
+
+  /* Color scheme 49: Slate Direct Utility Tokens */
+  --color-slate-silver: #bebebe;
+  --color-slate-mint: #79ed91;
+  --color-slate-emerald: #4dbe55;
+  --color-slate-mineral: #71776d;
+  --color-slate-blue: #698696;
+  --color-slate-canvas: #101413;
+  --color-slate-surface: #161c1a;
 }
 
 :root {
-  /* Cobalt sky — #0047AB cobalt · #000080 navy · #82C8E5 sky · #6D8196 slate */
-  --background: #eef3fb;
-  --foreground: #000080;
-  --card: #ffffff;
-  --card-foreground: #000080;
-  --panel: #ffffff;
-  --primary: #0047ab;
-  --primary-foreground: #ffffff;
-  --secondary: #82c8e5;
-  --secondary-foreground: #000080;
-  --accent: #0047ab;
-  --accent-foreground: #ffffff;
-  --muted: #d2e4f5;
-  --muted-foreground: #6d8196;
-  --border: #b8d0e8;
-  --ring: #0047ab;
-  --ok: #1d7a47;
-  --warn: #b07a18;
-  --err: #be3b30;
-  --shadow-color: 220 62% 24%;
+  /* Color scheme 49: Slate (Earth Observation / Geospatial Intelligence):
+     #BEBEBE (Light Slate Silver)
+     #79ED91 (Pastel Mint Green)
+     #4DBE55 (Emerald Slate Green)
+     #71776D (Deep Mineral Slate)
+     #698696 (Slate Blue-Grey)
+  */
+  --background: #101413;
+  --foreground: #e6ede8;
+  --card: #161c1a;
+  --card-foreground: #e6ede8;
+  --panel: #161c1a;
+  --primary: #4dbe55;
+  --primary-foreground: #081a0c;
+  --secondary: #698696;
+  --secondary-foreground: #f5f8fa;
+  --accent: #79ed91;
+  --accent-foreground: #071a0b;
+  --muted: #1f2824;
+  --muted-foreground: #8e9e96;
+  --border: #283630;
+  --ring: #79ed91;
+  --ok: #79ed91;
+  --warn: #d4a348;
+  --err: #e05353;
+  --shadow-color: 150 40% 3%;
 }
 
 .dark {
-  /* Cobalt sky dark — navy depths, sky highlights */
-  --background: #06091a;
-  --foreground: #cde6f6;
-  --card: #0c1430;
-  --card-foreground: #cde6f6;
-  --panel: #0c1430;
-  --primary: #82c8e5;
-  --primary-foreground: #000080;
-  --secondary: #162050;
-  --secondary-foreground: #cde6f6;
-  --accent: #82c8e5;
-  --accent-foreground: #000080;
-  --muted: #0f1c3e;
-  --muted-foreground: #6d8196;
-  --border: #1a2e5c;
-  --ring: #82c8e5;
-  --ok: #3aaa6e;
-  --warn: #d49a3e;
-  --err: #d45858;
-  --shadow-color: 226 62% 4%;
+  /* Color scheme 49: Slate Dark Mode */
+  --background: #0d1110;
+  --foreground: #e6ede8;
+  --card: #131816;
+  --card-foreground: #e6ede8;
+  --panel: #131816;
+  --primary: #4dbe55;
+  --primary-foreground: #081a0c;
+  --secondary: #698696;
+  --secondary-foreground: #f5f8fa;
+  --accent: #79ed91;
+  --accent-foreground: #071a0b;
+  --muted: #1a221f;
+  --muted-foreground: #8e9e96;
+  --border: #232f2a;
+  --ring: #79ed91;
+  --ok: #79ed91;
+  --warn: #d4a348;
+  --err: #e05353;
+  --shadow-color: 150 50% 2%;
 }
 
 * {
@@ -156,27 +172,41 @@ html[data-density='compact'] .panel {
 /* --- NeoMorphism: soft raised surfaces --- */
 .theme-neo .panel {
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-  background: var(--background);
+  border: 1px solid var(--border);
+  background: var(--card);
   box-shadow:
-    5px 5px 12px hsl(var(--shadow-color) / 0.16),
-    -5px -5px 12px color-mix(in srgb, white 75%, transparent);
+    5px 5px 14px hsl(var(--shadow-color) / 0.7),
+    -5px -5px 14px color-mix(in srgb, rgba(121, 237, 145, 0.04), transparent);
 }
 .dark.theme-neo .panel {
   box-shadow:
-    5px 5px 12px hsl(var(--shadow-color) / 0.6),
-    -5px -5px 12px color-mix(in srgb, white 4%, transparent);
+    5px 5px 14px hsl(var(--shadow-color) / 0.85),
+    -5px -5px 14px color-mix(in srgb, rgba(121, 237, 145, 0.05), transparent);
 }
 .theme-neo .panel-inset {
   box-shadow:
-    inset 3px 3px 7px hsl(var(--shadow-color) / 0.16),
-    inset -3px -3px 7px color-mix(in srgb, white 70%, transparent);
+    inset 3px 3px 7px hsl(var(--shadow-color) / 0.5),
+    inset -3px -3px 7px color-mix(in srgb, rgba(105, 134, 150, 0.04), transparent);
 }
 
 /* focus ring */
 .focus-ring:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+
+/* App Background: subtle Slate Earth Observation ambient wash */
+.app-bg {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse 55% 35% at 15% 0%, rgba(77, 190, 85, 0.09), transparent 70%),
+    radial-gradient(ellipse 45% 30% at 85% 10%, rgba(105, 134, 150, 0.08), transparent 70%);
+}
+.dark .app-bg {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse 55% 35% at 15% 0%, rgba(77, 190, 85, 0.12), transparent 70%),
+    radial-gradient(ellipse 45% 30% at 85% 10%, rgba(121, 237, 145, 0.09), transparent 70%);
 }
 
 @keyframes fadeUp {
@@ -192,3 +222,4 @@ html[data-density='compact'] .panel {
 .fade-up {
   animation: fadeUp 0.3s ease both;
 }
+

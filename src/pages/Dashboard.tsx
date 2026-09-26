@@ -5,7 +5,7 @@ import { SatImage, OverlayChange, OverlayGrid, ScaleTag, REGIONS, OverlayDynamic
 import { analyses as sampleAnalyses } from "../lib/data";
 import { ConfBadge, TaskIcon } from "../components/bits";
 import { IconArrow, IconZoomIn, IconZoomOut, IconReset, IconLayers, IconTrace, IconGlobe } from "../components/icons";
-import { api, type AnalysisRecord, type SystemHealth } from "../lib/api";
+import { api, getAnalysisImageUrl, type AnalysisRecord, type SystemHealth } from "../lib/api";
 
 export function Dashboard({ navigate }: { navigate: (r: Route) => void }) {
   const [latest, setLatest] = useState<any>(sampleAnalyses[0]);
@@ -56,6 +56,18 @@ export function Dashboard({ navigate }: { navigate: (r: Route) => void }) {
     };
   }, []);
 
+  const isReal = Boolean(latest.id && latest.id.startsWith("AN-") && latest.id.length > 8 && latest.id !== "AN-2041");
+  const primaryImg = isReal && latest.primary_image_path
+    ? (latest.primary_image_path.startsWith("http") || latest.primary_image_path.startsWith("/api")
+      ? latest.primary_image_path
+      : getAnalysisImageUrl(latest.id, "primary"))
+    : undefined;
+  const evidenceImg = isReal && latest.evidence_path
+    ? (latest.evidence_path.startsWith("http") || latest.evidence_path.startsWith("/api")
+      ? latest.evidence_path
+      : getAnalysisImageUrl(latest.id, "evidence"))
+    : undefined;
+
   return (
     <div className="space-y-8">
       {/* Start new analysis */}
@@ -83,7 +95,7 @@ export function Dashboard({ navigate }: { navigate: (r: Route) => void }) {
               <div className="flex items-center gap-2">
                 <TaskIcon task={latest.task} className="h-4 w-4 text-muted-foreground" />
                 <span className="text-[13px] font-medium">{latest.task}</span>
-                <Badge tone="neutral">{latest.id.startsWith("AN-") ? "Authentic Observation" : "Demonstration Scene"}</Badge>
+                <Badge tone="neutral">{isReal ? "Authentic Observation" : "High-Clarity Demonstration Scene"}</Badge>
               </div>
               <div className="flex items-center gap-0.5">
                 {[IconZoomIn, IconZoomOut, IconReset, IconLayers].map((Ic, i) => (
@@ -95,33 +107,35 @@ export function Dashboard({ navigate }: { navigate: (r: Route) => void }) {
             </div>
 
             <SatImage
-              src={latest.primary_image_path}
-              bbox={REGIONS.corridor}
+              src={primaryImg}
+              bbox={REGIONS.palmJumeirah}
               className="aspect-[16/10] w-full"
             >
-              {latest.evidence_path ? (
-                <OverlayImageLayer src={latest.evidence_path} opacity={0.8} />
-              ) : (
+              {evidenceImg ? (
+                <OverlayImageLayer src={evidenceImg} opacity={0.8} />
+              ) : isReal ? (
                 <OverlayChange />
-              )}
+              ) : null}
               {latest.boxes && latest.boxes.length > 0 ? (
                 <OverlayDynamicGrounding boxes={latest.boxes} />
               ) : null}
               <OverlayGrid />
-              <ScaleTag>Sentinel-2 MSI · EPSG:4326 · 10 m/px</ScaleTag>
-              <span className="mono absolute bottom-2 right-2 rounded-sm bg-[#1a1e2b]/70 px-1.5 py-0.5 text-[9.5px] text-white/90">
-                Active AOI Observation
+              <ScaleTag>
+                {isReal ? "Sentinel-2 / World Imagery · Sub-Meter Multi-Spectral" : "Palm Jumeirah · 0.5 m/px High Clarity · EPSG:4326"}
+              </ScaleTag>
+              <span className="mono absolute bottom-2 right-2 rounded-sm bg-[#141c18]/90 border border-[#283630] px-1.5 py-0.5 text-[9.5px] text-[#bebebe]">
+                {isReal ? "Active AOI Observation" : "Dubai Palm Jumeirah (25.11° N, 55.13° E)"}
               </span>
             </SatImage>
 
             {/* Restrained legend */}
             <div className="flex flex-wrap items-center gap-4 border-t border-border px-3 py-2">
-              <Legend c="#ab7c2c" label="Grounding / Built-up" />
-              <Legend c="#4f6f8a" label="Water Body" />
-              <Legend c="#38a169" label="Active Vegetation" />
-              <Legend c="#c2cbd3" label="Unchanged Surface" />
+              <Legend c="#4dbe55" label={isReal ? "Active Vegetation / Built-up Grounding" : "Residential Fronds / Built Infrastructure"} />
+              <Legend c="#698696" label={isReal ? "Water Body / SAR Extent" : "Arabian Gulf Deepwater Channels"} />
+              <Legend c="#79ed91" label={isReal ? "High-Confidence Spectral Feature" : "Marina Moorings & Breakwater Edge"} />
+              <Legend c="#71776d" label={isReal ? "Unchanged Slate Baseline" : "Stable Baseline Coastline"} />
               <span className="mono ml-auto text-[10.5px] text-muted-foreground">
-                {latest.id.startsWith("AN-") ? "Real Model Output" : "Demonstration Overlay"}
+                {isReal ? "Real Model Output" : "Demonstration Scene · Sub-Meter Clarity"}
               </span>
             </div>
           </Panel>

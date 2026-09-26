@@ -70,3 +70,19 @@ class PayloadTooLargeError(SatyaDristiError):
 class ValidationError(SatyaDristiError):
     def __init__(self, message: str = "Validation failed for request parameters or payload.", details: dict = None):
         super().__init__("VALIDATION_ERROR", message, status.HTTP_422_UNPROCESSABLE_ENTITY, details)
+
+class AIAuthenticationError(SatyaDristiError):
+    def __init__(self, message: str = "AI service authentication failed. Verify GEMINI_API_KEY.", details: dict = None):
+        super().__init__("AI_AUTHENTICATION_ERROR", message, status.HTTP_500_INTERNAL_SERVER_ERROR, details)
+
+class AIServiceUnavailableError(SatyaDristiError):
+    def __init__(self, message: str = "AI reasoning service is currently unavailable or rate limited.", details: dict = None):
+        super().__init__("AI_SERVICE_UNAVAILABLE", message, status.HTTP_503_SERVICE_UNAVAILABLE, details)
+
+class SARUnavailableError(SatyaDristiError):
+    def __init__(self, message: str = "Genuine SAR observation unavailable for the selected AOI. Synthetic pseudo-SAR is prohibited.", details: dict = None):
+        super().__init__("SAR_UNAVAILABLE", message, status.HTTP_400_BAD_REQUEST, details)
+
+class AIModalityUnsupportedError(SatyaDristiError):
+    def __init__(self, message: str = "The requested imagery modality is unsupported by the AI service.", details: dict = None):
+        super().__init__("AI_MODALITY_UNSUPPORTED", message, status.HTTP_422_UNPROCESSABLE_ENTITY, details)

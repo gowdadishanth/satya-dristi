@@ -6,14 +6,14 @@ import {
 import {
   UploadSlot, makeUploadedFile, revokeUploaded, type UploadedFile,
 } from "../components/Uploader";
-import { GlobalMap } from "../components/GlobalMap";
+import { GlobalMap, isSarScene } from "../components/GlobalMap";
 import { executionStages, type InputType, type TaskType } from "../lib/data";
 import {
   IconOptical, IconSar, IconChange, IconCheck, IconTriangle,
   IconLayers, IconZoomIn, IconZoomOut, IconReset, IconChevron,
   IconTrace, IconDownload, IconGlobe, IconUpload, IconFile,
 } from "../components/icons";
-import { api, type Scene, type AOIPreview, type AnalysisRecord, type AnalysisJobStatus } from "../lib/api";
+import { api, getAnalysisImageUrl, type Scene, type AOIPreview, type AnalysisRecord, type AnalysisJobStatus } from "../lib/api";
 
 type LayerKey = "optical" | "sar" | "change" | "grounding" | "grid";
 const REGION = REGIONS.corridor;
@@ -64,7 +64,92 @@ const sampleFiles: Record<Mode, { name: string; modality: string; res: string; s
   ],
 };
 
+function formatErrorMessage(raw: string): string {
+  if (!raw) return "Analysis failed. Please try again.";
+  if (raw.includes("503") || raw.toLowerCase().includes("high demand") || raw.toLowerCase().includes("unavailable")) {
+    return "The Gemini AI model was temporarily experiencing high demand. Automatic retry is enabled, please click Retry Analysis below.";
+  }
+  if (raw.includes("429") || raw.toLowerCase().includes("quota") || raw.toLowerCase().includes("rate limit")) {
+    return "Gemini API rate limit reached. Please wait a few seconds and click Retry Analysis.";
+  }
+  if (raw.includes("401") || raw.toLowerCase().includes("unauthorized") || raw.toLowerCase().includes("api key")) {
+    return "Invalid or unauthorized Gemini API key. Please check your GEMINI_API_KEY in backend/.env.";
+  }
+  const match = raw.match(/'message':\s*['"]([^'"]+)['"]/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return raw;
+}
+
+export type DetectedIntent = {
+  mode: Mode;
+  taskName: string;
+  sensorBadge: string;
+  reason: string;
+};
+
+export function detectQueryIntent(q: string): DetectedIntent {
+  const query = (q || "").toLowerCase();
+
+  // 1. SAR / Radar / All-Weather / Penetration Intent
+  const sarKeywords = [
+    "sar", "radar", "backscatter", "sigma0", "sigma 0", "decibel", "db",
+    "cloud", "penetrat", "monsoon", "night", "storm", "all-weather",
+    "roughness", "dielectric", "metallic", "vessel", "ship", "microwave",
+    "vv", "vh", "polarimetric"
+  ];
+  if (sarKeywords.some((k) => query.includes(k))) {
+    return {
+      mode: "fusion",
+      taskName: "Optical + SAR Multimodal Fusion",
+      sensorBadge: "Sentinel-1 SAR + Sentinel-2",
+      reason: "All-weather / radar backscatter query detected: automatically routing to Sentinel-1 C-SAR & Sentinel-2 fusion pipeline.",
+    };
+  }
+
+  // 2. Bi-Temporal Change Detection Intent
+  const changeKeywords = [
+    "change", "difference", "before and after", "before/after", "temporal",
+    "increased", "decreased", "growth", "shrink", "shrunk", "shrinkage",
+    "expansion", "encroach", "deforest", "loss", "gained", "built since",
+    "over time", "between 20", "since 20", "past years", "new construction",
+    "historical", "timeline", "years ago", "progress of"
+  ];
+  if (changeKeywords.some((k) => query.includes(k))) {
+    return {
+      mode: "temporal",
+      taskName: "Bi-Temporal Change Detection",
+      sensorBadge: "Multi-Temporal Sentinel-2 Pair",
+      reason: "Multi-temporal comparison detected: automatically routing to baseline historical & current observation change pipeline.",
+    };
+  }
+
+  // 3. Referral Grounding / Spatial Localization Intent
+  const groundingKeywords = [
+    "highlight", "locate", "find", "where is", "bounding box", "point out",
+    "delineate", "boundary", "demarcate", "isolate", "contour", "segment"
+  ];
+  if (groundingKeywords.some((k) => query.includes(k))) {
+    return {
+      mode: "single",
+      taskName: "Semantic Spatial Grounding",
+      sensorBadge: "Sentinel-2 10m L2A + Pixel Referral",
+      reason: "Spatial localization query detected: automatically routing to pixel coordinate referral and boundary grounding.",
+    };
+  }
+
+  // 4. Default: Single-Image Optical VQA / Land Cover Description
+  return {
+    mode: "single",
+    taskName: "Single-Image Optical VQA",
+    sensorBadge: "Sentinel-2 10m Multispectral",
+    reason: "Earth observation query detected: routing to high-resolution multispectral visual reasoning pipeline.",
+  };
+}
+
 export function Analyze() {
+  const [autoMode, setAutoMode] = useState(true);
   const [mode, setMode] = useState<Mode>("single");
   const [inputSource, setInputSource] = useState<InputSource>("map");
   const [files, setFiles] = useState<Record<string, UploadedFile | null>>({});
@@ -84,8 +169,12 @@ export function Analyze() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
 
-  const meta = modeMeta[mode];
-  const labels = slotLabels[mode];
+  // Auto-Routing: dynamically computes effective mode based on query intent
+  const detectedIntent = detectQueryIntent(query);
+  const effectiveMode: Mode = autoMode ? detectedIntent.mode : mode;
+
+  const meta = modeMeta[effectiveMode];
+  const labels = slotLabels[effectiveMode];
   const allReady = labels.every((l) => files[l]?.status === "ready");
   const anyInvalid = labels.some((l) => files[l]?.status === "invalid");
 
@@ -137,20 +226,28 @@ export function Analyze() {
       let job: AnalysisJobStatus;
 
       if (inputSource === "map") {
+        const isFirstSar = isSarScene(selectedScene);
+        const opticalSceneId = effectiveMode === "fusion"
+          ? (isFirstSar ? secondaryScene?.scene_id : selectedScene?.scene_id)
+          : selectedScene?.scene_id;
+        const sarSceneId = effectiveMode === "fusion"
+          ? (isFirstSar ? selectedScene?.scene_id : secondaryScene?.scene_id)
+          : undefined;
+
         job = await api.analyses.create({
-          mode,
+          mode: effectiveMode,
           query,
-          scene_id: selectedScene?.scene_id,
+          scene_id: opticalSceneId,
           aoi: selectedAoi,
-          before_scene_id: mode === "temporal" ? secondaryScene?.scene_id : undefined,
-          after_scene_id: mode === "temporal" ? selectedScene?.scene_id : undefined,
-          optical_scene_id: mode === "fusion" ? selectedScene?.scene_id : undefined,
-          sar_scene_id: mode === "fusion" ? secondaryScene?.scene_id : undefined,
+          before_scene_id: effectiveMode === "temporal" ? (secondaryScene?.scene_id || "AUTO_BASELINE") : undefined,
+          after_scene_id: effectiveMode === "temporal" ? selectedScene?.scene_id : undefined,
+          optical_scene_id: opticalSceneId,
+          sar_scene_id: sarSceneId,
         });
       } else {
         // Form data upload
         const formData = new FormData();
-        formData.append("mode", mode);
+        formData.append("mode", effectiveMode);
         formData.append("query", query);
         if (selectedAoi) {
           formData.append("aoi", JSON.stringify(selectedAoi));
@@ -287,30 +384,52 @@ export function Analyze() {
 
         {/* 2. ANALYSIS MODE */}
         <div>
-          <label className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Analysis Mode
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Analysis Mode
+            </label>
+            <button
+              type="button"
+              onClick={() => setAutoMode((a) => !a)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-semibold transition-all border cursor-pointer",
+                autoMode
+                  ? "bg-accent/15 border-accent text-accent shadow-xs"
+                  : "bg-muted border-border text-muted-foreground hover:text-foreground"
+              )}
+              title={autoMode ? "AI automatically selects the modality based on your query. Click to switch to manual mode." : "Manual mode active. Click to enable AI auto-routing."}
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full", autoMode ? "bg-accent animate-pulse" : "bg-muted-foreground")} />
+              {autoMode ? "AI Auto-Select: ON" : "Manual Mode"}
+            </button>
+          </div>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
             {(Object.keys(modeMeta) as Mode[]).map((m) => {
               const M = modeMeta[m];
-              const active = mode === m;
+              const active = effectiveMode === m;
               return (
                 <button
                   key={m}
                   type="button"
                   onClick={() => {
+                    setAutoMode(false);
                     setMode(m);
                     clearFiles();
                     reset();
                     setQuery(exampleQueries[m][0]);
                   }}
                   className={cn(
-                    "flex flex-col items-center gap-1 rounded-md border py-2 px-1 text-center transition-all",
+                    "relative flex flex-col items-center gap-1 rounded-md border py-2 px-1 text-center transition-all cursor-pointer",
                     active
                       ? "border-accent bg-accent/10 text-foreground font-semibold shadow-xs"
                       : "border-border text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
                   )}
                 >
+                  {autoMode && active && (
+                    <span className="absolute -top-1.5 right-1 px-1 rounded bg-accent text-[9px] font-bold text-[#081a0c] tracking-tight uppercase shadow-xs">
+                      AI Active
+                    </span>
+                  )}
                   <M.icon className="h-4 w-4 text-accent" />
                   <span className="text-[11px] leading-tight">{M.label}</span>
                 </button>
@@ -342,42 +461,90 @@ export function Analyze() {
                 <div className="rounded-md border border-border bg-muted/30 p-3">
                   <div className="flex items-center justify-between gap-1">
                     <span className="text-[12.5px] font-semibold text-foreground">
-                      {selectedScene.sensor.includes("sar") ? "Sentinel-1 SAR" : "Sentinel-2 L2A"}
+                      {isSarScene(selectedScene) ? "Sentinel-1 SAR" : "Sentinel-2 L2A"}
                     </span>
                     <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[color:var(--ok)]">
                       <IconCheck className="h-3.5 w-3.5" /> Ready
                     </span>
                   </div>
 
-                  <div className="mono mt-2 space-y-1 text-[11.5px] text-muted-foreground">
-                    <div className="flex justify-between">
-                      <span>Acquired:</span>
-                      <span className="font-medium text-foreground">{selectedScene.acquisition_datetime.slice(0, 10)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Cloud Cover:</span>
-                      <span className="font-medium text-foreground">
-                        {selectedScene.cloud_cover !== null ? `${selectedScene.cloud_cover}%` : "0% (All-weather)"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between truncate">
-                      <span>Scene ID:</span>
-                      <span className="font-medium text-foreground truncate ml-1">{selectedScene.scene_id.slice(0, 14)}…</span>
-                    </div>
-                    {selectedAoi && (
-                      <div className="flex justify-between">
-                        <span>AOI Area:</span>
-                        <span className="font-medium text-foreground">{selectedAoi.area_sq_km} km²</span>
+                  {effectiveMode === "temporal" ? (
+                    <div className="mt-2 space-y-2 text-[11.5px]">
+                      {/* Before Scene Card */}
+                      <div className="rounded border border-secondary/40 bg-secondary/10 p-2 mono space-y-1">
+                        <div className="flex justify-between items-center text-secondary font-semibold">
+                          <span>Observation 1 (Before Baseline):</span>
+                          <span>{secondaryScene ? secondaryScene.acquisition_datetime.slice(0, 4) : "—"}</span>
+                        </div>
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>Date:</span>
+                          <span className="font-medium text-foreground">
+                            {secondaryScene ? secondaryScene.acquisition_datetime.slice(0, 10) : "Not selected"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-muted-foreground truncate">
+                          <span>Scene:</span>
+                          <span className="font-medium text-foreground truncate ml-1">
+                            {secondaryScene ? secondaryScene.scene_id.slice(0, 16) + "…" : "—"}
+                          </span>
+                        </div>
                       </div>
-                    )}
-                  </div>
 
-                  {secondaryScene && (
-                    <div className="mt-2 border-t border-border/70 pt-1.5 text-[11px] text-muted-foreground">
-                      <span className="font-medium text-foreground">
-                        {mode === "temporal" ? "Baseline (Before): " : "SAR Modality: "}
-                      </span>
-                      <span className="mono truncate block">{secondaryScene.scene_id.slice(0, 20)}…</span>
+                      {/* After Scene Card */}
+                      <div className="rounded border border-accent/30 bg-accent/5 p-2 mono space-y-1">
+                        <div className="flex justify-between items-center text-accent font-semibold">
+                          <span>Observation 2 (After Target):</span>
+                          <span>{selectedScene ? selectedScene.acquisition_datetime.slice(0, 4) : "—"}</span>
+                        </div>
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>Date:</span>
+                          <span className="font-medium text-foreground">
+                            {selectedScene ? selectedScene.acquisition_datetime.slice(0, 10) : "Not selected"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-muted-foreground truncate">
+                          <span>Scene:</span>
+                          <span className="font-medium text-foreground truncate ml-1">
+                            {selectedScene ? selectedScene.scene_id.slice(0, 16) + "…" : "—"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {selectedAoi && (
+                        <div className="mono flex justify-between text-muted-foreground pt-1">
+                          <span>AOI Area:</span>
+                          <span className="font-medium text-foreground">{selectedAoi.area_sq_km} km²</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mono mt-2 space-y-1 text-[11.5px] text-muted-foreground">
+                      <div className="flex justify-between">
+                        <span>Acquired:</span>
+                        <span className="font-medium text-foreground">{selectedScene.acquisition_datetime.slice(0, 10)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Cloud Cover:</span>
+                        <span className="font-medium text-foreground">
+                          {selectedScene.cloud_cover !== null ? `${selectedScene.cloud_cover}%` : "0% (All-weather)"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between truncate">
+                        <span>Scene ID:</span>
+                        <span className="font-medium text-foreground truncate ml-1">{selectedScene.scene_id.slice(0, 14)}…</span>
+                      </div>
+                      {selectedAoi && (
+                        <div className="flex justify-between">
+                          <span>AOI Area:</span>
+                          <span className="font-medium text-foreground">{selectedAoi.area_sq_km} km²</span>
+                        </div>
+                      )}
+                      {secondaryScene && (
+                        <div className="mt-2 border-t border-border/70 pt-1.5 text-[11px] text-muted-foreground">
+                          <span className="font-medium text-foreground">SAR Modality: </span>
+                          <span className="mono truncate block">{secondaryScene.scene_id.slice(0, 20)}…</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -403,7 +570,7 @@ export function Analyze() {
               <div className="space-y-2">
                 {useSample ? (
                   <div className="space-y-1.5">
-                    {sampleFiles[mode].map((f) => (
+                    {sampleFiles[effectiveMode].map((f) => (
                       <div key={f.name} className="flex items-center gap-2 rounded border border-border bg-muted/30 px-2.5 py-1.5 text-[11.5px]">
                         <IconFile className="h-4 w-4 text-accent shrink-0" />
                         <span className="mono truncate font-medium">{f.name}</span>
@@ -432,44 +599,98 @@ export function Analyze() {
           </div>
         </div>
 
-        {/* 4. WHAT DO YOU WANT TO KNOW? (Question Input) */}
+        {/* 4. WHAT DO YOU WANT TO KNOW? (Question Input with Live AI Auto-Routing) */}
         <div>
-          <label htmlFor="q" className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-            What do you want to know?
-          </label>
+          <div className="flex items-center justify-between">
+            <label htmlFor="q" className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+              What do you want to know?
+            </label>
+            <span className="mono text-[10.5px] text-accent font-medium">
+              {autoMode ? "✦ AI Auto-Detecting" : "Manual Selection"}
+            </span>
+          </div>
           <textarea
             id="q"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             rows={3}
             className="mt-2 w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-[13.5px] leading-relaxed focus-ring placeholder:text-muted-foreground"
-            placeholder="Ask a natural language question about the satellite imagery…"
+            placeholder="Ask anything—e.g. land-cover, radar backscatter through clouds, or how the area changed over time…"
           />
 
-          {/* Concise Example Questions */}
-          <div className="mt-2">
-            <span className="mono text-[11px] text-muted-foreground">Quick examples:</span>
+          {/* Dynamic AI Intent & Sensor Auto-Routing Banner */}
+          {query.trim() && (
+            <div className="mt-2 rounded-md border border-accent/35 bg-accent/8 p-2.5 text-[11.5px] transition-all animate-in fade-in duration-200">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+                  </span>
+                  <span className="font-semibold text-accent shrink-0">Auto-Routing:</span>
+                  <span className="font-medium text-foreground truncate">{detectedIntent.taskName}</span>
+                </div>
+                <span className="shrink-0 mono rounded bg-background/90 px-1.5 py-0.5 text-[9.5px] text-foreground font-semibold border border-border">
+                  {detectedIntent.sensorBadge}
+                </span>
+              </div>
+              <p className="text-[10.5px] text-muted-foreground mt-1 leading-snug pl-3.5">
+                {detectedIntent.reason}
+              </p>
+            </div>
+          )}
+
+          {/* Multi-Modal Query Examples that showcase auto-routing */}
+          <div className="mt-2.5">
+            <span className="mono text-[11px] text-muted-foreground">Try asking anything (AI auto-switches pipeline):</span>
             <div className="mt-1 flex flex-col gap-1">
-              {exampleQueries[mode].slice(0, 3).map((q) => (
+              {[
+                { label: "Visual VQA", q: "Describe the major land-cover types visible in this area." },
+                { label: "Grounding", q: "Highlight water bodies and identify built-up structures." },
+                { label: "Temporal Change", q: "What changed between these observation dates? Detect urban growth or vegetation loss." },
+                { label: "SAR All-Weather", q: "Penetrate clouds using Sentinel-1 SAR backscatter to identify water bodies and structures." },
+              ].map((item) => (
                 <button
-                  key={q}
+                  key={item.q}
                   type="button"
-                  onClick={() => setQuery(q)}
-                  className="rounded border border-border/70 bg-card px-2 py-1 text-left text-[11px] text-muted-foreground hover:border-border hover:bg-muted/50 hover:text-foreground transition-colors truncate"
-                  title={q}
+                  onClick={() => setQuery(item.q)}
+                  className={cn(
+                    "rounded border border-border/70 bg-card px-2 py-1 text-left text-[11px] transition-colors truncate flex items-center justify-between gap-2 cursor-pointer",
+                    query === item.q
+                      ? "border-accent/60 bg-accent/10 text-foreground font-medium"
+                      : "text-muted-foreground hover:border-border hover:bg-muted/50 hover:text-foreground"
+                  )}
+                  title={item.q}
                 >
-                  {q}
+                  <span className="truncate">{item.q}</span>
+                  <span className="shrink-0 mono text-[9px] uppercase px-1 rounded bg-muted/60 text-muted-foreground">
+                    {item.label}
+                  </span>
                 </button>
               ))}
             </div>
           </div>
         </div>
 
-        {/* Error Notification */}
+        {/* Error Notification with User-Friendly Message & Retry Action */}
         {analysisError && (
-          <div className="flex items-start gap-2 rounded-md border border-[color:var(--err)]/40 bg-[color:var(--err)]/8 p-2.5">
-            <IconTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--err)]" />
-            <p className="text-[12px] leading-snug text-[color:var(--err)]">{analysisError}</p>
+          <div className="rounded-md border border-[color:var(--err)]/40 bg-[color:var(--err)]/8 p-3 space-y-2">
+            <div className="flex items-start gap-2">
+              <IconTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--err)]" />
+              <p className="text-[12px] leading-snug text-[color:var(--err)] font-medium">
+                {formatErrorMessage(analysisError)}
+              </p>
+            </div>
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={run}
+                disabled={phase === "running"}
+                className="px-2.5 py-1 rounded bg-[color:var(--err)] text-white text-[11px] font-semibold hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+              >
+                Retry Analysis ↻
+              </button>
+            </div>
           </div>
         )}
 
@@ -482,7 +703,7 @@ export function Analyze() {
             disabled={!hasImagery || anyInvalid || !query.trim() || phase === "running"}
             onClick={run}
           >
-            {phase === "running" ? "Analyzing Imagery…" : mode === "temporal" ? "Run Change Analysis" : "Run Analysis"}
+            {phase === "running" ? "Analyzing Imagery…" : effectiveMode === "temporal" ? "Run Change Analysis" : "Run Analysis"}
           </Button>
 
           <Button
@@ -521,13 +742,13 @@ export function Analyze() {
               </div>
             </div>
 
-            <ResultCanvas mode={mode} result={analysisResult} />
+            <ResultCanvas mode={effectiveMode} result={analysisResult} />
             <AnswerPanel record={analysisResult} />
           </div>
         ) : inputSource === "map" && phase !== "running" ? (
           /* Global Earth Observation Explorer (Map dominant, results beneath) */
           <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
-            <GlobalMap mode={mode} onSelectSceneAndAOI={handleSelectFromMap} />
+            <GlobalMap mode={effectiveMode} onSelectSceneAndAOI={handleSelectFromMap} />
           </div>
         ) : (
           /* Canvas Preview Frame for Manual Upload or Processing State */
@@ -540,15 +761,15 @@ export function Analyze() {
               <Badge tone="neutral">{phase === "running" ? "Processing" : "Preview Ready"}</Badge>
             </div>
 
-            <div className={cn("relative grid min-h-[460px] gap-2 p-2", mode === "single" ? "grid-cols-1" : "grid-cols-2")}>
-              {mode === "single" && <Frame label="Sentinel-2 Optical · 10 m/px" treatment="optical" />}
-              {mode === "fusion" && (
+            <div className={cn("relative grid min-h-[460px] gap-2 p-2", effectiveMode === "single" ? "grid-cols-1" : "grid-cols-2")}>
+              {effectiveMode === "single" && <Frame label="Sentinel-2 Optical · 10 m/px" treatment="optical" />}
+              {effectiveMode === "fusion" && (
                 <>
                   <Frame label="Sentinel-2 Optical" treatment="optical" />
                   <Frame label="Sentinel-1 SAR (C-band)" treatment="sar" />
                 </>
               )}
-              {mode === "temporal" && (
+              {effectiveMode === "temporal" && (
                 <>
                   <Frame label="Baseline Observation" treatment="optical" epoch="before" />
                   <Frame label="Target Observation" treatment="optical" epoch="after" />
@@ -709,10 +930,13 @@ function Frame({
 
 /* -------- Result Canvas with Dynamic Overlays -------- */
 function ResultCanvas({ mode, result }: { mode: Mode; result: AnalysisRecord }) {
+  const isTemporal = mode === "temporal" || result.task?.toLowerCase().includes("change");
+  const isFusion = mode === "fusion" || !!result.sar_image_path;
+
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     optical: true,
-    sar: mode === "fusion" || !!result.sar_image_path,
-    change: mode === "temporal" || !!result.evidence_path,
+    sar: isFusion,
+    change: isTemporal,
     grounding: (result.boxes && result.boxes.length > 0) || mode === "single",
     grid: true,
   });
@@ -722,18 +946,43 @@ function ResultCanvas({ mode, result }: { mode: Mode; result: AnalysisRecord }) 
 
   const layerList: { key: LayerKey; label: string }[] = [
     { key: "optical", label: "Optical Imagery" },
-    { key: "sar", label: "SAR Backscatter" },
-    { key: "change", label: "Change Detection Map" },
-    { key: "grounding", label: "Grounding Bounding Boxes" },
+    ...(isFusion ? [{ key: "sar" as LayerKey, label: "SAR Backscatter" }] : []),
+    ...(isTemporal ? [{ key: "change" as LayerKey, label: "Change Detection Map" }] : []),
+    { key: "grounding", label: "Sharp Difference Contours & Pinpoint" },
     { key: "grid", label: "Grid Reference" },
   ];
 
-  const primaryImg = result.primary_image_path || undefined;
-  const beforeImg = result.before_image_path || primaryImg;
-  const sarImg = result.sar_image_path || undefined;
-  const evidenceImg = result.evidence_path || undefined;
+  const primaryImg = result.primary_image_path
+    ? (result.primary_image_path.startsWith("http") || result.primary_image_path.startsWith("/api")
+      ? result.primary_image_path
+      : getAnalysisImageUrl(result.analysis_id, "primary"))
+    : undefined;
+  const beforeImg = result.before_image_path
+    ? (result.before_image_path.startsWith("http") || result.before_image_path.startsWith("/api")
+      ? result.before_image_path
+      : getAnalysisImageUrl(result.analysis_id, "before"))
+    : primaryImg;
+  const sarImg = result.sar_image_path
+    ? (result.sar_image_path.startsWith("http") || result.sar_image_path.startsWith("/api")
+      ? result.sar_image_path
+      : getAnalysisImageUrl(result.analysis_id, "sar"))
+    : undefined;
+  const evidenceImg = result.evidence_path
+    ? (result.evidence_path.startsWith("http") || result.evidence_path.startsWith("/api")
+      ? result.evidence_path
+      : getAnalysisImageUrl(result.analysis_id, "evidence"))
+    : undefined;
 
-  const treatment = layers.sar && !layers.optical ? "sar" : "optical";
+  const showDualTemporal = mode === "temporal" && Boolean(beforeImg && primaryImg);
+  const showDualFusion = isFusion && Boolean(sarImg && primaryImg && layers.optical && layers.sar);
+  const isComparing = showDualTemporal || showDualFusion;
+
+  // Single-view image source and label
+  const singleImg = layers.sar && !layers.optical ? (sarImg || primaryImg) : primaryImg;
+  const singleTreatment = layers.sar && !layers.optical ? "sar" : "optical";
+  const singleLabel = layers.sar && !layers.optical
+    ? "Sentinel-1 C-SAR Backscatter (dB) · 10 m/px · EPSG:4326"
+    : "Sentinel-2 MSI (Reflectance) · 10 m/px · EPSG:4326";
 
   return (
     <div className="rounded-lg border border-border bg-card shadow-xs overflow-hidden fade-up">
@@ -743,7 +992,7 @@ function ResultCanvas({ mode, result }: { mode: Mode; result: AnalysisRecord }) 
           <span className="text-[13px] font-semibold text-foreground">Visual Evidence · {result.task}</span>
         </div>
         <div className="flex items-center gap-2">
-          {mode === "temporal" && (
+          {isComparing && (
             <div className="flex overflow-hidden rounded border border-border text-[11px]">
               {(["side", "swipe"] as const).map((c) => (
                 <button
@@ -767,7 +1016,7 @@ function ResultCanvas({ mode, result }: { mode: Mode; result: AnalysisRecord }) 
 
       <div className="grid gap-0 md:grid-cols-[1fr_200px]">
         <div className="relative bg-muted/40 p-2.5">
-          {mode === "temporal" && compare === "side" ? (
+          {showDualTemporal && compare === "side" ? (
             <div className="grid grid-cols-2 gap-2">
               <SatImage src={beforeImg} epoch="before" className="min-h-[280px] rounded-md border border-border">
                 {layers.grid && <OverlayGrid />}
@@ -780,7 +1029,7 @@ function ResultCanvas({ mode, result }: { mode: Mode; result: AnalysisRecord }) 
                 <ScaleTag>Observation 2 · Target</ScaleTag>
               </SatImage>
             </div>
-          ) : mode === "temporal" && compare === "swipe" ? (
+          ) : showDualTemporal && compare === "swipe" ? (
             <div className="relative min-h-[360px] overflow-hidden rounded-md border border-border">
               <SatImage src={beforeImg} epoch="before" className="absolute inset-0 h-full w-full">
                 <ScaleTag>Observation 1 · Baseline</ScaleTag>
@@ -803,18 +1052,56 @@ function ResultCanvas({ mode, result }: { mode: Mode; result: AnalysisRecord }) 
                 aria-label="Swipe comparison"
                 className="absolute bottom-3 left-1/2 w-2/3 -translate-x-1/2 accent-[color:var(--primary)]"
               />
-              <span className="mono absolute right-2 top-2 rounded-sm bg-[#1a1e2b]/70 px-1.5 py-0.5 text-[10px] text-white/90">
+              <span className="mono absolute right-2 top-2 rounded-sm bg-[#141c18]/90 border border-[#283630] px-1.5 py-0.5 text-[10px] text-[#bebebe]">
                 Observation 2 · Target
               </span>
             </div>
+          ) : showDualFusion && compare === "side" ? (
+            <div className="grid grid-cols-2 gap-2">
+              <SatImage src={primaryImg} treatment="optical" className="min-h-[280px] rounded-md border border-border">
+                {layers.grid && <OverlayGrid />}
+                {layers.grounding && <OverlayDynamicGrounding boxes={result.boxes} />}
+                <ScaleTag>Sentinel-2 Optical (Reflectance)</ScaleTag>
+              </SatImage>
+              <SatImage src={sarImg} treatment="sar" className="min-h-[280px] rounded-md border border-border">
+                {layers.grid && <OverlayGrid />}
+                {layers.grounding && <OverlayDynamicGrounding boxes={result.boxes} />}
+                <ScaleTag>Sentinel-1 C-SAR Backscatter (dB)</ScaleTag>
+              </SatImage>
+            </div>
+          ) : showDualFusion && compare === "swipe" ? (
+            <div className="relative min-h-[360px] overflow-hidden rounded-md border border-border">
+              <SatImage src={primaryImg} treatment="optical" className="absolute inset-0 h-full w-full">
+                <ScaleTag>Sentinel-2 Optical (Reflectance)</ScaleTag>
+              </SatImage>
+              <div className="absolute inset-0 h-full" style={{ clipPath: `inset(0 0 0 ${swipe}%)` }}>
+                <SatImage src={sarImg} treatment="sar" className="h-full w-full">
+                  {layers.grid && <OverlayGrid />}
+                  {layers.grounding && <OverlayDynamicGrounding boxes={result.boxes} />}
+                </SatImage>
+              </div>
+              <div className="absolute inset-y-0" style={{ left: `${swipe}%` }}>
+                <div className="h-full w-0.5 -translate-x-1/2 bg-white/90" />
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={swipe}
+                onChange={(e) => setSwipe(+e.target.value)}
+                aria-label="Swipe comparison"
+                className="absolute bottom-3 left-1/2 w-2/3 -translate-x-1/2 accent-[color:var(--primary)]"
+              />
+              <span className="mono absolute right-2 top-2 rounded-sm bg-[#141c18]/90 border border-[#283630] px-1.5 py-0.5 text-[10px] text-[#bebebe]">
+                Sentinel-1 SAR Backscatter
+              </span>
+            </div>
           ) : (
-            <SatImage src={layers.sar ? sarImg || primaryImg : primaryImg} treatment={treatment} className="min-h-[360px] rounded-md border border-border">
+            <SatImage src={singleImg} treatment={singleTreatment} className="min-h-[360px] rounded-md border border-border">
               {layers.grid && <OverlayGrid />}
               {layers.change && <OverlayImageLayer src={evidenceImg} opacity={opacity / 100} />}
               {layers.grounding && <OverlayDynamicGrounding boxes={result.boxes} />}
-              <ScaleTag>
-                {treatment === "sar" ? "Sentinel-1 SAR (dB)" : "Sentinel-2 MSI (Reflectance)"} · 10 m/px · EPSG:4326
-              </ScaleTag>
+              <ScaleTag>{singleLabel}</ScaleTag>
             </SatImage>
           )}
         </div>
@@ -856,10 +1143,10 @@ function ResultCanvas({ mode, result }: { mode: Mode; result: AnalysisRecord }) 
           <div className="mt-4 border-t border-border pt-3">
             <span className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground">Evidence Legend</span>
             <div className="mt-2 space-y-1.5 text-[11.5px]">
-              <Legend c="#ab7c2c" label="Grounding / Built-up" />
-              <Legend c="#4f6f8a" label="Water Body / Low Backscatter" />
-              <Legend c="#38a169" label="Active Vegetation (NDVI)" />
-              <Legend c="#c2cbd3" label="Unchanged Surface" />
+              <Legend c="#4dbe55" label="Built-up Grounding / Land Feature" />
+              <Legend c="#698696" label="Water Body / Low Backscatter" />
+              <Legend c="#79ed91" label="High-Confidence Spectral Change" />
+              <Legend c="#71776d" label="Unchanged Slate Baseline" />
             </div>
           </div>
         </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Route } from "../App";
 import { Panel, Eyebrow, cn } from "../components/ui";
-import { analyses as initialAnalyses, type TaskType } from "../lib/data";
+import { type TaskType } from "../lib/data";
 import { ConfBadge, TaskIcon } from "../components/bits";
 import { IconSearch, IconArrow } from "../components/icons";
 import { api, type AnalysisRecord } from "../lib/api";
@@ -19,10 +19,12 @@ export function History({ navigate }: { navigate: (r: Route) => void }) {
   const [task, setTask] = useState<TaskType | "All">("All");
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
+    setError(null);
 
     api.history.list({
       task: task === "All" ? undefined : task,
@@ -41,23 +43,20 @@ export function History({ navigate }: { navigate: (r: Route) => void }) {
               answer: d.answer,
             })));
           } else {
-            // If no user analyses in DB yet, show fallback sample rows
-            setRecords(
-              initialAnalyses.filter(
-                (a) => (task === "All" || a.task === task) && a.query.toLowerCase().includes(q.toLowerCase())
-              )
-            );
+            setRecords([]);
           }
           setLoading(false);
         }
       })
-      .catch(() => {
+      .catch((err: any) => {
         if (mounted) {
-          setRecords(
-            initialAnalyses.filter(
-              (a) => (task === "All" || a.task === task) && a.query.toLowerCase().includes(q.toLowerCase())
-            )
-          );
+          setRecords([]);
+          const rawMsg = err?.message || "";
+          if (rawMsg.includes("Authorization") || rawMsg.includes("UNAUTHORIZED")) {
+            setError("Authentication required. Please sign in to view historical analyses.");
+          } else {
+            setError(rawMsg || "Failed to load historical analyses.");
+          }
           setLoading(false);
         }
       });
@@ -120,9 +119,25 @@ export function History({ navigate }: { navigate: (r: Route) => void }) {
             <IconArrow className="hidden h-4 w-4 text-muted-foreground md:block" />
           </button>
         ))}
-        {records.length === 0 && !loading && (
+        {records.length === 0 && !loading && !error && (
           <div className="px-4 py-10 text-center text-[13px] text-muted-foreground">
             No analyses match your search criteria.
+          </div>
+        )}
+        {error && !loading && (
+          <div className="px-4 py-8 text-center text-[13px] text-[color:var(--err)] space-y-3">
+            <div>{error}</div>
+            {error.toLowerCase().includes("sign in") && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent("open-auth-modal"))}
+                  className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  Sign In with Google →
+                </button>
+              </div>
+            )}
           </div>
         )}
         {loading && (

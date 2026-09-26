@@ -125,6 +125,7 @@ class GeospatialProcessor:
         """
         red = red.astype(np.float32)
         green = green.astype(np.float32)
+        blue = blue.astype(np.float32)
         eps = 1e-6
 
         # If NIR band is available
@@ -136,7 +137,7 @@ class GeospatialProcessor:
             # Green-Red Normalized Difference (Visible Atmospherically Resistant Index)
             ndvi = (green - red) / (green + red + eps)
             # Normalized Difference Water Index using green and blue
-            ndwi = (green - red) / (green + red + eps)
+            ndwi = (green - blue) / (green + blue + eps)
 
         return {
             "ndvi": np.clip(ndvi, -1.0, 1.0),
@@ -148,23 +149,13 @@ class GeospatialProcessor:
         """
         Converts SAR digital number (DN) amplitudes into calibrated backscatter coefficient Sigma0 (dB).
         Returns:
-            db_arr: array in decibels (-30 to +5 dB)
+            db_arr: array in decibels (-24 to 0 dB)
             norm_arr: normalized 0..255 grayscale visualization
         """
-        # Linear power sigma0
-        float_arr = sar_arr.astype(np.float32)
-        power = np.square(float_arr)
-        power = np.maximum(power, 1e-6)
-        
-        # Sigma0 in dB
-        db_arr = 10.0 * np.log10(power)
-        
-        # Normalization range: -25 dB (calm water/dark surfaces) to 0 dB (dense urban/double bounce)
-        min_db = -25.0
-        max_db = 0.0
-        clipped = np.clip(db_arr, min_db, max_db)
-        norm_arr = ((clipped - min_db) / (max_db - min_db) * 255.0).astype(np.uint8)
-        
+        float_arr = np.clip(sar_arr.astype(np.float32), 0.0, 255.0)
+        # Linear radiometric mapping from 8-bit DN [0, 255] -> [-24.0 dB, 0.0 dB]
+        db_arr = -24.0 + (float_arr / 255.0) * 24.0
+        norm_arr = float_arr.astype(np.uint8)
         return db_arr, norm_arr
 
 geospatial_processor = GeospatialProcessor()

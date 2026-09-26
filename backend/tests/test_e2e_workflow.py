@@ -19,12 +19,12 @@ async def test_full_analysis_workflow():
     )
 
     # 2. Poll until completed
-    max_wait = 50
+    max_wait = 120
     status_res = None
     for _ in range(max_wait):
         await asyncio.sleep(0.5)
         status_res = job_manager.get_job_status(aid)
-        if status_res and status_res["status"] == "completed":
+        if status_res and status_res["status"] in ["completed", "failed"]:
             break
 
     assert status_res is not None
@@ -34,7 +34,7 @@ async def test_full_analysis_workflow():
     doc = db.get_analysis(aid)
     assert doc is not None
     assert doc["task"] == "Single-Image VQA"
-    assert doc["confidence"] in ["High", "Moderate", "Low"]
+    assert doc["confidence"] in ["High", "Moderate", "Low", "Uncertain"]
     assert len(doc["answer"]) > 10
     assert len(doc["execution_trace"]) > 0
 

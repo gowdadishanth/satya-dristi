@@ -22,14 +22,14 @@ export type Analysis = {
 export const analyses: Analysis[] = [
   {
     id: "AN-2041",
-    query: "What changed between these two dates along the river corridor?",
+    query: "High-resolution coastal monitoring and infrastructure audit on Palm Jumeirah.",
     task: "Bi-Temporal Change",
     input: "Before + After",
-    date: "2026-09-14",
-    time: "11:24",
-    confidence: "Moderate",
+    date: "2026-09-21",
+    time: "14:30",
+    confidence: "High",
     status: "Complete",
-    answer: "Built-up area increased primarily along the eastern corridor; a new water surface appears south of the settlement.",
+    answer: "Sub-meter multispectral analysis reveals precision-engineered marine fronds, high-density beachfront residential infrastructure, active yacht berths, and stabilized deep-water tidal navigation channels with no coastal erosion.",
   },
   {
     id: "AN-2038",

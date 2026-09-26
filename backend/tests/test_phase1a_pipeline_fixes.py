@@ -57,14 +57,23 @@ def test_p1a_evidence_artifacts_unique_per_analysis():
     assert path_2.is_file(), "Analysis 2 evidence file must exist"
 
     # Cleanup
-    if path_1.is_file():
-        path_1.unlink()
-    if path_2.is_file():
-        path_2.unlink()
+    for res in [res_1, res_2]:
+        for k in ["mask_path", "evidence_image_path", "evidence_path"]:
+            if k in res and res[k] and Path(res[k]).is_file():
+                try:
+                    Path(res[k]).unlink()
+                except Exception:
+                    pass
     if path_1.parent.is_dir():
-        path_1.parent.rmdir()
+        try:
+            path_1.parent.rmdir()
+        except Exception:
+            pass
     if path_2.parent.is_dir():
-        path_2.parent.rmdir()
+        try:
+            path_2.parent.rmdir()
+        except Exception:
+            pass
 
 def test_p1a_evidence_endpoint_authorization_and_traversal_protection():
     """
@@ -219,9 +228,9 @@ def test_p1a_background_task_strong_reference_tracking():
         # Verify task was registered
         assert len(job_manager._tasks) >= initial_tasks_count + 1, "Task must be added to _tasks"
 
-        # Wait for completion (small local task runs quickly)
-        for _ in range(30):
-            await asyncio.sleep(0.1)
+        # Wait for completion (allow sufficient time if upstream AI provider performs backoff)
+        for _ in range(240):
+            await asyncio.sleep(0.25)
             status_info = job_manager.get_job_status(aid)
             if status_info and status_info["status"] in ["completed", "failed"]:
                 break

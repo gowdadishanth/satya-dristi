@@ -3,6 +3,13 @@ dist/
 build/
 .cache/
 .env*
+*.env
+.env.local
+.env.*.local
+*firebase-adminsdk*.json
+*service_account*.json
+*.pem
+*.key
 .vite/
 vite.config.*.timestamp-*
 *.tsbuildinfo
@@ -19,15 +26,22 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+.agents/
 
 # Python & Backend data
 .venv/
 venv/
 **/__pycache__/
 *.pyc
+.pytest_cache/
 backend/data/cache/
 backend/data/reports/
 backend/data/uploads/
+backend/data/evidence/
 backend/data/
 *.docx
 *.pdf
+test_*.pdf
+test_*.docx
+backend/test_*.pdf
+backend/test_*.docx

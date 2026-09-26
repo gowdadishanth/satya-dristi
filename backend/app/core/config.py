@@ -32,7 +32,12 @@ class Settings(BaseSettings):
     FIREBASE_CREDENTIALS_PATH: str = os.getenv("FIREBASE_CREDENTIALS_PATH", "")
     GOOGLE_APPLICATION_CREDENTIALS: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
     
-    # Default device & execution
+    # AI Provider & Gemini API Configuration
+    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "gemini")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+    # Default device & execution (legacy fallback)
     MAX_VRAM_USAGE_MB: int = 3500
     PREFER_GPU: bool = True
 
