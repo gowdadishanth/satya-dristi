@@ -22,7 +22,10 @@ export type UserProfile = {
 
 // Official Satya Dristi Firebase Web App Configuration
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
+  apiKey:
+    (typeof window !== "undefined" ? localStorage.getItem("sd_firebase_api_key") : null) ||
+    import.meta.env.VITE_FIREBASE_API_KEY ||
+    "AIzaSyCCfK8gd51E1aCdGY_MTB5Bo3ME25oPXjc",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "satya-dristi.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "satya-dristi",
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "satya-dristi.firebasestorage.app",
@@ -269,8 +272,37 @@ export class FirebaseAuthService {
           "Firebase Web API key is invalid or missing. Please configure VITE_FIREBASE_API_KEY in your .env file."
         );
       }
+      if (code === "auth/unauthorized-domain") {
+        throw new Error(
+          `This domain (${typeof window !== "undefined" ? window.location.hostname : "web"}) is not yet authorized in Firebase Console. Please add it under Authentication > Settings > Authorized domains, or use 'Sign in as Guest Analyst'.`
+        );
+      }
       throw new Error(err?.message || "Google authentication failed.");
     }
+  }
+
+  /**
+   * Fast Demo / Guest Analyst authentication.
+   * Enables immediate platform access without external OAuth requirements.
+   */
+  signInAsGuest(name = "Guest Analyst", email = "analyst.guest@satya-dristi.gov.in"): UserProfile {
+    const profile: UserProfile = {
+      uid: "guest-" + Math.random().toString(36).substring(2, 10),
+      email,
+      name,
+      displayName: name,
+      photoURL: undefined,
+      picture: undefined,
+    };
+    this.user = profile;
+    const mockJwt = `sd-jwt-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sd_auth_token", mockJwt);
+      localStorage.setItem("sd_user_profile", JSON.stringify(profile));
+      sessionStorage.removeItem("sd_explicit_sign_out");
+    }
+    this.notifyListeners(profile);
+    return profile;
   }
 
   // Alias for backward compatibility
