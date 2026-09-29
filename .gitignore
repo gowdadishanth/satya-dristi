@@ -46,3 +46,4 @@ test_*.pdf
 test_*.docx
 backend/test_*.pdf
 backend/test_*.docx
+.vercel
