@@ -7,9 +7,11 @@ import { mockService } from "./mockService";
  * Guarantees 100% functionality on Vercel and standalone environments.
  */
 
-const RAW_API_BASE = (import.meta.env.VITE_API_BASE_URL || "").trim();
+const RAW_API_BASE = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
 export const hasCustomBackend = Boolean(RAW_API_BASE && RAW_API_BASE !== "");
-const API_BASE = hasCustomBackend ? RAW_API_BASE : "/api/v1";
+const API_BASE = hasCustomBackend
+  ? (RAW_API_BASE.endsWith("/api/v1") ? RAW_API_BASE : `${RAW_API_BASE}/api/v1`)
+  : "/api/v1";
 
 export async function getAuthToken(forceRefresh = false): Promise<string | null> {
   if (typeof window === "undefined") return null;

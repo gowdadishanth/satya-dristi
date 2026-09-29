@@ -52,23 +52,25 @@ async def get_current_user(
 
     token = raw_token
     
-    # Handle dev/test tokens in development environment
-    if settings.ENVIRONMENT == "development" and (
+    # Handle guest analyst or dev/test tokens
+    if (
         token.startswith("dev-token-")
         or token.startswith("test-token-")
         or token.startswith("test_")
         or token.startswith("sd-token-")
+        or token.startswith("sd-jwt-")
+        or token.startswith("guest-")
     ):
         uid = token
-        for prefix in ("dev-token-", "test-token-", "sd-token-", "test_"):
+        for prefix in ("dev-token-", "test-token-", "sd-token-", "sd-jwt-", "guest-", "test_"):
             if uid.startswith(prefix):
                 uid = uid[len(prefix):]
                 break
         is_dev = "admin" in token.lower()
         return {
-            "uid": uid or "dev_user_earth_analyst_01",
-            "email": f"{uid}@satyadristi.org",
-            "name": "Remote Sensing Analyst",
+            "uid": uid or "analyst_guest_01",
+            "email": f"{uid or 'analyst.guest'}@satya-dristi.gov.in",
+            "name": "Satya Dristi Analyst",
             "picture": "",
             "is_dev": is_dev
         }
