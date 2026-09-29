@@ -60,6 +60,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   const aoiLayerRef = useRef<L.Rectangle | null>(null);
   const footprintsLayerRef = useRef<L.LayerGroup | null>(null);
   const clickMarkerRef = useRef<L.CircleMarker | null>(null);
+  const suppressNextClickRef = useRef<boolean>(false);
 
   // Search & Navigation State
   const [searchQuery, setSearchQuery] = useState("");
@@ -182,6 +183,11 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
 
     // Click anywhere on map to select location
     map.on("click", async (e: L.LeafletMouseEvent) => {
+      if (suppressNextClickRef.current) {
+        suppressNextClickRef.current = false;
+        return;
+      }
+
       const wrapped = e.latlng.wrap();
       const lat = Number(Math.max(-85, Math.min(85, wrapped.lat)).toFixed(4));
       const lon = Number(((((wrapped.lng + 180) % 360 + 360) % 360) - 180).toFixed(4));
@@ -559,6 +565,12 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       if (!startLatLng || !mapRef.current) return;
       const finalBounds = L.latLngBounds(startLatLng, e.latlng.wrap());
       if (tempRect) mapRef.current.removeLayer(tempRect);
+
+      suppressNextClickRef.current = true;
+      setTimeout(() => {
+        suppressNextClickRef.current = false;
+      }, 300);
+
       createAoiFromBounds(finalBounds);
       mapRef.current.dragging.enable();
       setDrawingAoi(false);

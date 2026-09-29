@@ -89,6 +89,13 @@ export type DetectedIntent = {
   reason: string;
 };
 
+function matchesKeyword(text: string, keyword: string): boolean {
+  if (keyword.endsWith("penetrat") || keyword.endsWith("encroach")) {
+    return new RegExp(`\\b${keyword}`, "i").test(text);
+  }
+  return new RegExp(`\\b${keyword.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "i").test(text);
+}
+
 export function detectQueryIntent(q: string): DetectedIntent {
   const query = (q || "").toLowerCase();
 
@@ -99,7 +106,7 @@ export function detectQueryIntent(q: string): DetectedIntent {
     "roughness", "dielectric", "metallic", "vessel", "ship", "microwave",
     "vv", "vh", "polarimetric"
   ];
-  if (sarKeywords.some((k) => query.includes(k))) {
+  if (sarKeywords.some((k) => matchesKeyword(query, k))) {
     return {
       mode: "fusion",
       taskName: "Optical + SAR Multimodal Fusion",
@@ -116,7 +123,7 @@ export function detectQueryIntent(q: string): DetectedIntent {
     "over time", "between 20", "since 20", "past years", "new construction",
     "historical", "timeline", "years ago", "progress of"
   ];
-  if (changeKeywords.some((k) => query.includes(k))) {
+  if (changeKeywords.some((k) => matchesKeyword(query, k))) {
     return {
       mode: "temporal",
       taskName: "Bi-Temporal Change Detection",
@@ -130,7 +137,7 @@ export function detectQueryIntent(q: string): DetectedIntent {
     "highlight", "locate", "find", "where is", "bounding box", "point out",
     "delineate", "boundary", "demarcate", "isolate", "contour", "segment"
   ];
-  if (groundingKeywords.some((k) => query.includes(k))) {
+  if (groundingKeywords.some((k) => matchesKeyword(query, k))) {
     return {
       mode: "single",
       taskName: "Semantic Spatial Grounding",
@@ -252,7 +259,9 @@ export function Analyze() {
         if (selectedAoi) {
           formData.append("aoi", JSON.stringify(selectedAoi));
         }
-        Object.entries(files).forEach(([slot, uploaded]) => {
+        const currentLabels = slotLabels[effectiveMode] || [];
+        currentLabels.forEach((slot) => {
+          const uploaded = files[slot];
           if (uploaded?.file) {
             formData.append(slot.toLowerCase(), uploaded.file);
           }

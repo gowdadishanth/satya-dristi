@@ -388,10 +388,12 @@ export const mockService = {
       }
 
       const records = getStoredAnalyses();
-      const match = records.find((r) => r.analysis_id === analysisId);
+      const match = records.find(
+        (r) => r.analysis_id === analysisId || `REP-${r.analysis_id.replace(/^AN-/, "")}` === analysisId
+      );
       if (match) return match;
 
-      return records[0];
+      throw new Error(`Analysis record not found: ${analysisId}`);
     },
 
     async delete(analysisId: string): Promise<{ deleted: boolean; analysis_id: string }> {
@@ -441,7 +443,7 @@ export const mockService = {
         date: a.date,
         time: a.time,
         confidence: a.confidence,
-        status: "Verified",
+        status: a.status === "Complete" ? "Verified" : "Draft",
         answer: a.answer,
         generated_at: a.created_at,
         pdf_filename: `Satya_Dristi_Report_${a.analysis_id}.pdf`,
@@ -451,15 +453,24 @@ export const mockService = {
 
     async getDetail(reportId: string): Promise<ReportItem> {
       const list = await mockService.reports.list();
-      const match = list.find((r) => r.report_id === reportId);
+      const match = list.find((r) => r.report_id === reportId || r.analysis_id === reportId);
       if (match) return match;
-      return list[0];
+      throw new Error(`Report not found: ${reportId}`);
     },
 
     async downloadPdf(reportId: string, customFilename?: string): Promise<string> {
       const reports = await mockService.reports.list();
-      const report = reports.find((r) => r.report_id === reportId) || reports[0];
+      const report = reports.find((r) => r.report_id === reportId || r.analysis_id === reportId);
+      if (!report) {
+        throw new Error(`Report not found for PDF generation: ${reportId}`);
+      }
       const filename = customFilename || `Satya_Dristi_Report_${report.analysis_id || reportId}.pdf`;
+
+      const analyses = getStoredAnalyses();
+      const record = analyses.find((a) => a.analysis_id === report.analysis_id || a.analysis_id === reportId);
+      const scorePct = record?.confidence_score
+        ? (record.confidence_score * 100).toFixed(1)
+        : report.confidence === "High" ? "94.2" : report.confidence === "Moderate" ? "81.5" : "62.0";
 
       // Generate a genuine, high-quality, professional PDF document using jsPDF
       const doc = new jsPDF({
@@ -511,12 +522,12 @@ export const mockService = {
       doc.text("GOVERNANCE:", 115, 76);
 
       doc.setTextColor(16, 185, 129); // green
-      doc.text(`${report.confidence} (94.2% verified)`, 155, 52);
+      doc.text(`${report.confidence} (${scorePct}% verified)`, 155, 52);
       doc.setTextColor(15, 23, 42);
       doc.setFont("helvetica", "normal");
-      doc.text("Cryptographically Verified", 155, 60);
+      doc.text("Verified Analysis (Edge / STAC)", 155, 60);
       doc.text("Sentinel-2 L2A & Sentinel-1 C-SAR", 155, 68);
-      doc.text("Official SIH 2026 Audit", 155, 76);
+      doc.text("Official Platform Audit", 155, 76);
 
       // Section 1: Query & Intent
       doc.setDrawColor(203, 213, 225);
@@ -560,15 +571,21 @@ export const mockService = {
       doc.text("Spectral / Radar Metric", 80, 166);
       doc.text("Cross-Modal Agreement", 145, 166);
 
-      const rows = [
-        ["Sentinel-2 MSI (10m)", "Surface Reflectance (B2, B3, B4, B8, B11)", "Strong Agreement (96%)"],
-        ["Sentinel-1 C-SAR", "Interferometric Wide GRD (VV/VH backscatter)", "Consistent (93%)"],
-        ["Bi-Temporal Coherence", "Geometric Baseline Spatial Registration", "Verified (98.6%)"],
-      ];
+      const dynamicRows = (record?.agreements && record.agreements.length > 0)
+        ? record.agreements.map((a, idx) => [
+            idx === 0 ? "Sentinel-2 MSI (10m)" : idx === 1 ? "Sentinel-1 C-SAR" : "Spatial Coherence",
+            a.label,
+            a.state === "agree" ? "Strong Agreement (95%)" : a.state === "partial" ? "Partial Agreement (78%)" : "Uncertain"
+          ])
+        : [
+            ["Sentinel-2 MSI (10m)", "Surface Reflectance (B2, B3, B4, B8, B11)", "Strong Agreement (96%)"],
+            ["Sentinel-1 C-SAR", "Interferometric Wide GRD (VV/VH backscatter)", "Consistent (93%)"],
+            ["Bi-Temporal Coherence", "Geometric Baseline Spatial Registration", "Verified (98.6%)"],
+          ];
 
       doc.setFont("helvetica", "normal");
       doc.setTextColor(51, 65, 85);
-      rows.forEach((r, idx) => {
+      dynamicRows.forEach((r, idx) => {
         const y = 174 + idx * 8;
         doc.text(r[0], 18, y);
         doc.text(r[1], 80, y);
@@ -591,7 +608,10 @@ export const mockService = {
 
     async downloadJson(reportId: string, customFilename?: string): Promise<string> {
       const reports = await mockService.reports.list();
-      const report = reports.find((r) => r.report_id === reportId) || reports[0];
+      const report = reports.find((r) => r.report_id === reportId || r.analysis_id === reportId);
+      if (!report) {
+        throw new Error(`Report not found for JSON export: ${reportId}`);
+      }
       const filename = customFilename || `Satya_Dristi_Report_${report.analysis_id || reportId}.json`;
 
       const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });

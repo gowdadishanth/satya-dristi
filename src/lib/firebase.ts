@@ -99,6 +99,18 @@ export class FirebaseAuthService {
         }).catch(() => {});
       }
 
+      // Restore persisted guest or cached profile on startup
+      const cachedToken = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
+      if (cachedToken && (cachedToken.startsWith("sd-") || cachedToken.startsWith("guest-"))) {
+        const cachedProfile = localStorage.getItem("sd_user_profile");
+        if (cachedProfile) {
+          try {
+            this.user = JSON.parse(cachedProfile);
+            this.notifyListeners(this.user);
+          } catch {}
+        }
+      }
+
       // Listen to real Firebase Auth state changes
       fbOnAuthStateChanged(this.auth, async (fbUser: FirebaseUser | null) => {
         if (fbUser) {
@@ -113,6 +125,20 @@ export class FirebaseAuthService {
           localStorage.setItem("sd_user_profile", JSON.stringify(profile));
           this.notifyListeners(profile);
         } else {
+          // If the active session is a Guest Analyst, preserve session across reloads
+          const activeToken = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
+          const isGuestSession = activeToken && (activeToken.startsWith("sd-") || activeToken.startsWith("guest-"));
+          if (isGuestSession) {
+            const cachedProfile = localStorage.getItem("sd_user_profile");
+            if (cachedProfile) {
+              try {
+                this.user = JSON.parse(cachedProfile);
+                this.notifyListeners(this.user);
+                return;
+              } catch {}
+            }
+          }
+
           this.user = null;
           localStorage.removeItem("sd_auth_token");
           localStorage.removeItem("sd_user_profile");
@@ -130,7 +156,10 @@ export class FirebaseAuthService {
             // Ignore
           }
         } else {
-          localStorage.removeItem("sd_auth_token");
+          const activeToken = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
+          if (!activeToken || (!activeToken.startsWith("sd-") && !activeToken.startsWith("guest-"))) {
+            localStorage.removeItem("sd_auth_token");
+          }
         }
       });
     } catch (err) {
