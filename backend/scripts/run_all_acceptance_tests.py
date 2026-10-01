@@ -33,13 +33,17 @@ def run_tests():
         "execution_trace": [{"name": "Validation", "detail": "CRS matched - EPSG:4326", "duration": "0.10s"}]
     }
     rep_gen = report_generator.generate_report_artifacts(sample_analysis)
+    from app.core.db import db
+    db.save_analysis(sample_analysis)
+    rep_gen["uid"] = "analyst_01"
+    db.save_report(rep_gen)
     pdf_gen_path = Path(rep_gen["pdf_path"])
     assert pdf_gen_path.exists(), "TEST 1 FAILED: PDF file not created on disk"
     assert report_generator.is_valid_pdf_file(str(pdf_gen_path)), "TEST 1 FAILED: Invalid PDF file structure"
     print("TEST 1: Generate PDF on backend -> PASS: valid PDF generated.")
 
     # TEST 2: Download PDF directly from API
-    pdf_res = requests.get(f"{BASE_URL}/reports/AN-2041/download", headers=DEV_AUTH)
+    pdf_res = requests.get(f"{BASE_URL}/reports/AN-ACCEPT-01/download", headers=DEV_AUTH)
     assert pdf_res.status_code == 200, f"TEST 2 FAILED: HTTP status {pdf_res.status_code}"
     assert "application/pdf" in pdf_res.headers.get("content-type", ""), "TEST 2 FAILED: Wrong Content-Type"
     assert pdf_res.content.startswith(b"%PDF-"), "TEST 2 FAILED: Missing %PDF- magic bytes"
@@ -71,7 +75,7 @@ def run_tests():
     print("TEST 5: Generate JSON -> PASS: Valid JSON generated.")
 
     # TEST 6: Download JSON
-    json_res = requests.get(f"{BASE_URL}/reports/AN-2041/json", headers=DEV_AUTH)
+    json_res = requests.get(f"{BASE_URL}/reports/AN-ACCEPT-01/json", headers=DEV_AUTH)
     assert json_res.status_code == 200, f"TEST 6 FAILED: HTTP status {json_res.status_code}"
     assert "application/json" in json_res.headers.get("content-type", ""), "TEST 6 FAILED: Wrong Content-Type"
     json_body = json.loads(json_res.content.decode("utf-8"))
@@ -85,28 +89,28 @@ def run_tests():
     assert cd_json_header.strip().endswith('.json"'), f"TEST 7 FAILED: Filename does not end with .json ({cd_json_header})"
     print(f"TEST 7: Verify JSON filename -> PASS: Content-Disposition={cd_json_header}")
 
-    # TEST 8 & 9: Frontend filename resolver simulation & legacy mapping
-    # (Testing legacy ana-01 and verify resolveSafeDownloadFilename)
-    leg_pdf = requests.get(f"{BASE_URL}/reports/ana-01/download", headers=DEV_AUTH)
-    assert leg_pdf.status_code == 200, "TEST 8 FAILED: Legacy ana-01 PDF returned non-200"
+    # TEST 8 & 9: Report ID direct resolution simulation
+    rep_id = rep_gen["report_id"]
+    leg_pdf = requests.get(f"{BASE_URL}/reports/{rep_id}/download", headers=DEV_AUTH)
+    assert leg_pdf.status_code == 200, "TEST 8 FAILED: Direct report_id PDF returned non-200"
     leg_reader = pypdf.PdfReader(io.BytesIO(leg_pdf.content))
-    assert len(leg_reader.pages) >= 1, "TEST 8 FAILED: Legacy PDF unreadable"
-    print(f"TEST 8: Download through frontend / legacy ID (ana-01) -> PASS: valid PDF ({len(leg_pdf.content)} bytes).")
+    assert len(leg_reader.pages) >= 1, "TEST 8 FAILED: Report PDF unreadable"
+    print(f"TEST 8: Download through report_id ({rep_id}) -> PASS: valid PDF ({len(leg_pdf.content)} bytes).")
 
-    leg_json = requests.get(f"{BASE_URL}/reports/ana-01/json", headers=DEV_AUTH)
-    assert leg_json.status_code == 200, "TEST 9 FAILED: Legacy ana-01 JSON returned non-200"
+    leg_json = requests.get(f"{BASE_URL}/reports/{rep_id}/json", headers=DEV_AUTH)
+    assert leg_json.status_code == 200, "TEST 9 FAILED: Direct report_id JSON returned non-200"
     leg_json_data = json.loads(leg_json.content.decode("utf-8"))
-    assert leg_json_data["report_id"] == "REP-2041", "TEST 9 FAILED: Legacy mapping failed"
-    print("TEST 9: Download JSON through frontend / legacy ID (ana-01) -> PASS: valid parsed JSON.")
+    assert leg_json_data["report_id"] == rep_id, "TEST 9 FAILED: Report ID mapping mismatch"
+    print("TEST 9: Download JSON through report_id -> PASS: valid parsed JSON.")
 
     # TEST 10: Unauthorized user tries to download
-    unauth_pdf = requests.get(f"{BASE_URL}/reports/AN-2041/download", headers={"Authorization": "Bearer invalid-unauth-token-9999"})
+    unauth_pdf = requests.get(f"{BASE_URL}/reports/AN-ACCEPT-01/download", headers={"Authorization": "Bearer invalid-unauth-token-9999"})
     assert unauth_pdf.status_code == 401, f"TEST 10 FAILED: Expected 401, got {unauth_pdf.status_code}"
     assert "application/pdf" not in unauth_pdf.headers.get("content-type", ""), "TEST 10 FAILED: Returned PDF for unauthorized user"
     print("TEST 10: Unauthorized user tries to download -> PASS: HTTP 401 Unauthorized, zero file downloaded.")
 
     # Verify CORS expose headers
-    get_res = requests.get(f"{BASE_URL}/reports/AN-2041/download", headers={"Authorization": "Bearer dev-token-01", "Origin": "http://localhost:8443"})
+    get_res = requests.get(f"{BASE_URL}/reports/AN-ACCEPT-01/download", headers={"Authorization": "Bearer dev-token-01", "Origin": "http://localhost:8443"})
     assert "Content-Disposition" in get_res.headers.get("access-control-expose-headers", ""), "CORS expose-headers missing Content-Disposition"
     print("CORS Access-Control-Expose-Headers -> PASS:", get_res.headers.get("access-control-expose-headers"))
     

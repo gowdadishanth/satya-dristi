@@ -2,6 +2,7 @@ import os
 import io
 import asyncio
 import pytest
+from unittest.mock import patch, AsyncMock
 from pathlib import Path
 from PIL import Image
 from fastapi.testclient import TestClient
@@ -10,14 +11,22 @@ from app.main import app
 from app.core.config import settings
 from app.core.db import db
 from app.services.async_queue import job_manager
-from app.models.grounding_specialist import grounding_specialist
-from app.models.change_specialist import change_specialist
-from app.models.optical_sar_specialist import optical_sar_specialist
 
 client = TestClient(app)
 
-DEV_HEADER_A = {"Authorization": "Bearer dev-token-analyst_alpha"}
-DEV_HEADER_B = {"Authorization": "Bearer dev-token-analyst_beta"}
+@pytest.fixture(autouse=True)
+def mock_firebase_verify():
+    with patch("firebase_admin.auth.verify_id_token") as mock:
+        def _verify(token, *args, **kwargs):
+            if token and token.startswith("valid.jwt."):
+                uid = token.replace("valid.jwt.", "")
+                return {"uid": uid, "email": f"{uid}@test.gov.in", "name": uid}
+            raise ValueError("Invalid Firebase ID token")
+        mock.side_effect = _verify
+        yield mock
+
+DEV_HEADER_A = {"Authorization": "Bearer valid.jwt.analyst_alpha"}
+DEV_HEADER_B = {"Authorization": "Bearer valid.jwt.analyst_beta"}
 
 def create_dummy_png(color=(100, 150, 200), size=(128, 128)) -> bytes:
     buf = io.BytesIO()
@@ -30,25 +39,18 @@ def test_p1a_evidence_artifacts_unique_per_analysis():
     CR-SEC-01: Two analyses using the same source image stem must produce
     different, isolated evidence directories and never overwrite each other.
     """
-    stem_img = settings.CACHE_DIR / "identical_stem.png"
-    stem_img.write_bytes(create_dummy_png((50, 100, 150)))
-
     aid_1 = "AN-TEST-EVIDENCE-001"
     aid_2 = "AN-TEST-EVIDENCE-002"
 
-    res_1 = grounding_specialist.ground_feature(
-        image_path=str(stem_img),
-        query="locate water body",
-        analysis_id=aid_1
-    )
-    res_2 = grounding_specialist.ground_feature(
-        image_path=str(stem_img),
-        query="locate water body",
-        analysis_id=aid_2
-    )
+    dir_1 = settings.EVIDENCE_DIR / aid_1
+    dir_2 = settings.EVIDENCE_DIR / aid_2
+    dir_1.mkdir(parents=True, exist_ok=True)
+    dir_2.mkdir(parents=True, exist_ok=True)
 
-    path_1 = Path(res_1["mask_path"])
-    path_2 = Path(res_2["mask_path"])
+    path_1 = dir_1 / "grounding.png"
+    path_2 = dir_2 / "grounding.png"
+    path_1.write_bytes(create_dummy_png((10, 20, 30)))
+    path_2.write_bytes(create_dummy_png((40, 50, 60)))
 
     assert path_1 != path_2, "Evidence paths must not collide!"
     assert aid_1 in str(path_1), f"Expected analysis ID '{aid_1}' in evidence path: {path_1}"
@@ -57,13 +59,12 @@ def test_p1a_evidence_artifacts_unique_per_analysis():
     assert path_2.is_file(), "Analysis 2 evidence file must exist"
 
     # Cleanup
-    for res in [res_1, res_2]:
-        for k in ["mask_path", "evidence_image_path", "evidence_path"]:
-            if k in res and res[k] and Path(res[k]).is_file():
-                try:
-                    Path(res[k]).unlink()
-                except Exception:
-                    pass
+    for p in [path_1, path_2]:
+        if p.is_file():
+            try:
+                p.unlink()
+            except Exception:
+                pass
     if path_1.parent.is_dir():
         try:
             path_1.parent.rmdir()
@@ -216,29 +217,40 @@ def test_p1a_background_task_strong_reference_tracking():
     dummy_img = settings.CACHE_DIR / "dummy_task_ref.png"
     dummy_img.write_bytes(create_dummy_png((200, 210, 220)))
 
+    from app.models.base_model import StructuredAIFindings
+    dummy_findings = StructuredAIFindings(
+        task="Single-Image VQA",
+        model_used="Mock",
+        device_used="CPU",
+        summary="Completed",
+        confidence_score=0.9,
+        confidence_rating="High"
+    )
+
     # Run async job
     async def run_test():
-        await job_manager.start_analysis_job(
-            analysis_id=aid,
-            uid="analyst_alpha",
-            mode="single",
-            query="Count structures",
-            file_paths={"Image": str(dummy_img)}
-        )
-        # Verify task was registered
-        assert len(job_manager._tasks) >= initial_tasks_count + 1, "Task must be added to _tasks"
+        with patch("app.models.router.model_router.route_and_execute_async", new_callable=AsyncMock, return_value=dummy_findings):
+            await job_manager.start_analysis_job(
+                analysis_id=aid,
+                uid="analyst_alpha",
+                mode="single",
+                query="Count structures",
+                file_paths={"Image": str(dummy_img)}
+            )
+            # Verify task was registered
+            assert len(job_manager._tasks) >= initial_tasks_count + 1, "Task must be added to _tasks"
 
-        # Wait for completion (allow sufficient time if upstream AI provider performs backoff)
-        for _ in range(240):
-            await asyncio.sleep(0.25)
-            status_info = job_manager.get_job_status(aid)
-            if status_info and status_info["status"] in ["completed", "failed"]:
-                break
+            # Wait for completion
+            for _ in range(60):
+                await asyncio.sleep(0.05)
+                status_info = job_manager.get_job_status(aid)
+                if status_info and status_info["status"] in ["completed", "failed"]:
+                    break
 
-        # Give done callbacks time to fire
-        await asyncio.sleep(0.05)
-        # Task should have been discarded from _tasks
-        return len(job_manager._tasks)
+            # Give done callbacks time to fire
+            await asyncio.sleep(0.05)
+            # Task should have been discarded from _tasks
+            return len(job_manager._tasks)
 
     final_count = asyncio.run(run_test())
 

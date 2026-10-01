@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.core.firebase import get_current_user
 from app.core.db import db
-from app.models.optical_sar_specialist import optical_sar_specialist
 from app.services.report_generator import report_generator
 from app.core.config import settings
 
@@ -165,70 +164,79 @@ def test_p0_invalid_aoi_produces_real_error():
     finally:
         app.dependency_overrides.clear()
 
-def test_p0_optical_sar_confidence_dynamic(tmp_path):
-    """Requirement: Optical/SAR confidence is not hardcoded and reflects actual computed evidence."""
-    opt_path = tmp_path / "opt.png"
-    sar_path = tmp_path / "sar.png"
-    
-    # 1. Matching pair: water reservoir in optical, matching specular low backscatter in SAR
-    opt_arr = np.full((100, 100, 3), [60, 110, 40], dtype=np.uint8)
-    opt_arr[30:70, 30:70] = [20, 60, 160] # water (blue dominant)
-    Image.fromarray(opt_arr).save(opt_path)
+def test_p0_empty_history_for_new_user():
+    """Requirement: When a user has no real analyses, return a proper empty list."""
+    new_user = {"uid": f"new_user_{uuid.uuid4().hex[:8]}", "email": "new@example.com", "name": "New User", "is_dev": False}
+    app.dependency_overrides[get_current_user] = lambda: new_user
+    try:
+        res = client.get("/api/v1/history")
+        assert res.status_code == 200
+        assert res.json() == []
 
-    sar_arr = np.full((100, 100), 120, dtype=np.uint8)
-    sar_arr[30:70, 30:70] = 30 # water specular reflection
-    Image.fromarray(sar_arr).save(sar_path)
-
-    res_matching = optical_sar_specialist.fuse_and_analyze(
-        optical_path=str(opt_path),
-        sar_path=str(sar_path),
-        query="Verify water extent"
-    )
-    assert res_matching["confidence"] in ["High", "Moderate"]
-    assert res_matching["agreements"][0]["state"] == "agree"
-
-    # 2. Complete conflict: optical shows clear open water, but SAR exhibits intense double-bounce scatter
-    opt_conflict = tmp_path / "opt_conflict.png"
-    sar_conflict = tmp_path / "sar_conflict.png"
-    opt_conflict_arr = np.full((100, 100, 3), [20, 60, 160], dtype=np.uint8) # 100% water in optical
-    sar_conflict_arr = np.full((100, 100), 230, dtype=np.uint8) # 100% urban double bounce in SAR
-    Image.fromarray(opt_conflict_arr).save(opt_conflict)
-    Image.fromarray(sar_conflict_arr).save(sar_conflict)
-
-    res_conflict = optical_sar_specialist.fuse_and_analyze(
-        optical_path=str(opt_conflict),
-        sar_path=str(sar_conflict),
-        query="Verify water extent"
-    )
-    assert res_conflict["confidence"] == "Low"
-    assert res_conflict["agreements"][2]["state"] == "conflict"
-    assert res_conflict["confidence_score"] < res_matching["confidence_score"]
+        res_rep = client.get("/api/v1/reports")
+        assert res_rep.status_code == 200
+        assert res_rep.json() == []
+    finally:
+        app.dependency_overrides.clear()
 
 def test_p0_sample_records_isolated_per_user():
-    """Requirement: Ensure demonstration/sample records cannot overwrite or leak across users."""
-    app.dependency_overrides[get_current_user] = lambda: USER_A
+    """Requirement: Ensure user analysis records cannot overwrite or leak across users."""
+    aid_a = f"AN-TEST-USER-A-{uuid.uuid4().hex[:6]}"
+    aid_b = f"AN-TEST-USER-B-{uuid.uuid4().hex[:6]}"
+    from app.core.db import _local_store
+    db.save_analysis({
+        "analysis_id": aid_a,
+        "uid": USER_A["uid"],
+        "task": "Single-Image VQA",
+        "input": "Single image",
+        "query": "Analysis for User A",
+        "answer": "Answer for User A",
+        "date": "2026-09-20",
+        "time": "10:00",
+        "confidence": "High",
+        "confidence_score": 0.95,
+        "status": "Complete",
+        "created_at": "2026-09-20T10:00:00Z"
+    })
+    db.save_analysis({
+        "analysis_id": aid_b,
+        "uid": USER_B["uid"],
+        "task": "Single-Image VQA",
+        "input": "Single image",
+        "query": "Analysis for User B",
+        "answer": "Answer for User B",
+        "date": "2026-09-20",
+        "time": "10:00",
+        "confidence": "High",
+        "confidence_score": 0.95,
+        "status": "Complete",
+        "created_at": "2026-09-20T10:00:00Z"
+    })
+
     try:
+        app.dependency_overrides[get_current_user] = lambda: USER_A
         res_a = client.get("/api/v1/history")
         assert res_a.status_code == 200
         history_a = res_a.json()
-        assert len(history_a) > 0
         aids_a = {item["analysis_id"] for item in history_a}
+        assert aid_a in aids_a
+        assert aid_b not in aids_a
         for item in history_a:
             assert item["uid"] == USER_A["uid"]
-    finally:
-        app.dependency_overrides.clear()
 
-    app.dependency_overrides[get_current_user] = lambda: USER_B
-    try:
+        app.dependency_overrides[get_current_user] = lambda: USER_B
         res_b = client.get("/api/v1/history")
         assert res_b.status_code == 200
         history_b = res_b.json()
-        assert len(history_b) > 0
         aids_b = {item["analysis_id"] for item in history_b}
+        assert aid_b in aids_b
+        assert aid_a not in aids_b
         for item in history_b:
             assert item["uid"] == USER_B["uid"]
-        
-        # User A and User B must NOT share the same analysis IDs (no overwriting or collision)
-        assert aids_a.isdisjoint(aids_b), "User A and User B sample records collided!"
+
+        assert aids_a.isdisjoint(aids_b), "User A and User B records collided!"
     finally:
         app.dependency_overrides.clear()
+        _local_store.delete_document("analyses", aid_a)
+        _local_store.delete_document("analyses", aid_b)
+

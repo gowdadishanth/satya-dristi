@@ -4,6 +4,8 @@ import re
 import json
 from pathlib import Path
 import pypdf
+import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from app.main import app
 from app.services.report_generator import report_generator
@@ -13,8 +15,19 @@ from app.core.firebase import get_current_user
 
 client = TestClient(app)
 
+@pytest.fixture(autouse=True)
+def mock_firebase_verify():
+    with patch("firebase_admin.auth.verify_id_token") as mock:
+        def _verify(token, *args, **kwargs):
+            if token and token.startswith("valid.jwt."):
+                uid = token.replace("valid.jwt.", "")
+                return {"uid": uid, "email": f"{uid}@test.gov.in", "name": "Analyst"}
+            raise ValueError("Invalid Firebase ID token")
+        mock.side_effect = _verify
+        yield mock
+
 def get_auth_header():
-    return {"Authorization": "Bearer dev-token-dev_user_earth_analyst_01"}
+    return {"Authorization": "Bearer valid.jwt.dev_user_earth_analyst_01"}
 
 def test_1_generate_pdf_and_json_on_backend():
     """TEST 1 & TEST 5: Generate PDF and JSON on backend, verify validity."""

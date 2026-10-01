@@ -14,7 +14,6 @@ export type Region = { z: number; x: number; y: number };
 
 // Tile coordinates (z/x/y) for real areas with water bodies + built-up land.
 export const REGIONS: Record<string, Region> = {
-  palmJumeirah: { z: 16, x: 42804, y: 28041 }, // Dubai Palm Jumeirah - pristine sub-meter coastal fronds & marine infrastructure
   urbanWater: { z: 14, x: 11762, y: 7386 }, // Hussain Sagar & urban Hyderabad
   corridor: { z: 14, x: 11860, y: 7430 }, // Krishna-basin river corridor + cropland
   delta: { z: 14, x: 11912, y: 7438 }, // Coastal delta, vegetation + water
@@ -88,8 +87,8 @@ export function SatImage({
   // Only apply synthetic SAR simulation filter if using ESRI tile fallback without a genuine SAR source
   const filter = sar && !showSrc ? "grayscale(1) contrast(1.6) brightness(0.82)" : epochFilter;
 
-  // Use provided region or default to palmJumeirah (high clarity)
-  const activeRegion = bbox || REGIONS.palmJumeirah;
+  // Use provided region or default to urbanWater (Hyderabad / Hussain Sagar)
+  const activeRegion = bbox || REGIONS.urbanWater;
   const { z, x, y } = activeRegion;
   const tiles: Region[] = [
     { z, x, y },

@@ -12,10 +12,6 @@ from app.services.geospatial_processor import geospatial_processor
 from app.services.confidence_engine import confidence_engine
 from app.models.resource_manager import resource_manager
 from app.models.router import model_router
-from app.models.vqa_specialist import vqa_specialist
-from app.models.grounding_specialist import grounding_specialist
-from app.models.change_specialist import change_specialist
-from app.models.optical_sar_specialist import optical_sar_specialist
 
 logger = logging.getLogger(__name__)
 
@@ -182,22 +178,26 @@ class AnalysisJobManager:
                     scene_a = {"scene_id": kwargs["after_scene_id"], "year": y, "bbox": aoi_bbox}
                 primary_image_path, _ = await image_retrieval_service.retrieve_scene_image(scene_a, aoi_bbox=aoi_bbox, treatment="optical")
 
-            # Fallback if testing without external network scene
+            # Fallback to authentic AOI imagery if scene ID resolution omitted
             if not primary_image_path:
-                # Authentic Dubai Palm Jumeirah satellite asset
+                target_bbox = aoi_bbox if (aoi_bbox and len(aoi_bbox) == 4) else [78.44, 17.39, 78.49, 17.44]
                 primary_image_path, _ = await image_retrieval_service.retrieve_scene_image(
-                    {"scene_id": "S2_PALM_DEMO", "bbox": [55.112, 25.098, 55.162, 25.138]},
-                    aoi_bbox=aoi_bbox, treatment="optical"
+                    {"scene_id": opt_scene_id or f"S2A_MSIL2A_AOI_{int(abs(hash(str(target_bbox)))) % 100000}", "bbox": target_bbox},
+                    aoi_bbox=target_bbox, treatment="optical"
                 )
 
             if (kwargs.get("sar_scene_id") or kwargs.get("mode") == "fusion" or task_name == "Optical + SAR Fusion") and not sar_image_path:
-                sar_id = kwargs.get("sar_scene_id") or f"S1A_IW_GRDH_{int(abs(hash(str(aoi_bbox)))) % 100000}"
+                sar_id = kwargs.get("sar_scene_id")
+                if not sar_id:
+                    raise SARUnavailableError(
+                        "Optical + SAR fusion requires a genuine Sentinel-1 SAR observation. No SAR scene was provided."
+                    )
                 try:
                     scene_sar = await stac_service.get_scene_details(sar_id)
                 except Exception:
                     scene_sar = {"scene_id": sar_id, "bbox": aoi_bbox, "platform": "Sentinel-1", "collection": "sentinel-1-grd"}
                 sar_image_path, _ = await image_retrieval_service.retrieve_scene_image(
-                    scene_sar, aoi_bbox=aoi_bbox, treatment="sar", reference_optical_path=primary_image_path
+                    scene_sar, aoi_bbox=aoi_bbox, treatment="sar"
                 )
 
             record_stage("Retrieving scene", "Imagery clipped to AOI geometry", time.time() - t0)

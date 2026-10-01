@@ -36,12 +36,9 @@ export const firebaseConfig = {
 
 export function isJwtExpired(token: string | null, bufferSeconds = 60): boolean {
   if (!token || typeof token !== "string") return true;
-  if (token.startsWith("dev-") || token.startsWith("test-") || token.startsWith("sd-")) {
-    return false;
-  }
   try {
     const parts = token.split(".");
-    if (parts.length < 2) return false;
+    if (parts.length < 2) return true;
     const base64Url = parts[1];
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
     const jsonPayload = decodeURIComponent(
@@ -54,10 +51,10 @@ export function isJwtExpired(token: string | null, bufferSeconds = 60): boolean 
     if (typeof parsed.exp === "number") {
       return parsed.exp * 1000 <= Date.now() + bufferSeconds * 1000;
     }
+    return true;
   } catch {
-    // If parsing fails, do not assume expired
+    return true;
   }
-  return false;
 }
 
 export class FirebaseAuthService {
@@ -99,18 +96,6 @@ export class FirebaseAuthService {
         }).catch(() => {});
       }
 
-      // Restore persisted guest or cached profile on startup
-      const cachedToken = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
-      if (cachedToken && (cachedToken.startsWith("sd-") || cachedToken.startsWith("guest-"))) {
-        const cachedProfile = localStorage.getItem("sd_user_profile");
-        if (cachedProfile) {
-          try {
-            this.user = JSON.parse(cachedProfile);
-            this.notifyListeners(this.user);
-          } catch {}
-        }
-      }
-
       // Listen to real Firebase Auth state changes
       fbOnAuthStateChanged(this.auth, async (fbUser: FirebaseUser | null) => {
         if (fbUser) {
@@ -125,20 +110,6 @@ export class FirebaseAuthService {
           localStorage.setItem("sd_user_profile", JSON.stringify(profile));
           this.notifyListeners(profile);
         } else {
-          // If the active session is a Guest Analyst, preserve session across reloads
-          const activeToken = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
-          const isGuestSession = activeToken && (activeToken.startsWith("sd-") || activeToken.startsWith("guest-"));
-          if (isGuestSession) {
-            const cachedProfile = localStorage.getItem("sd_user_profile");
-            if (cachedProfile) {
-              try {
-                this.user = JSON.parse(cachedProfile);
-                this.notifyListeners(this.user);
-                return;
-              } catch {}
-            }
-          }
-
           this.user = null;
           localStorage.removeItem("sd_auth_token");
           localStorage.removeItem("sd_user_profile");
@@ -156,10 +127,7 @@ export class FirebaseAuthService {
             // Ignore
           }
         } else {
-          const activeToken = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
-          if (!activeToken || (!activeToken.startsWith("sd-") && !activeToken.startsWith("guest-"))) {
-            localStorage.removeItem("sd_auth_token");
-          }
+          localStorage.removeItem("sd_auth_token");
         }
       });
     } catch (err) {
@@ -311,27 +279,13 @@ export class FirebaseAuthService {
   }
 
   /**
-   * Fast Demo / Guest Analyst authentication.
-   * Enables immediate platform access without external OAuth requirements.
+   * Guest authentication is strictly disabled.
+   * Users must authenticate via Firebase Google Sign-In with real ID tokens.
    */
-  signInAsGuest(name = "Guest Analyst", email = "analyst.guest@satya-dristi.gov.in"): UserProfile {
-    const profile: UserProfile = {
-      uid: "guest-" + Math.random().toString(36).substring(2, 10),
-      email,
-      name,
-      displayName: name,
-      photoURL: undefined,
-      picture: undefined,
-    };
-    this.user = profile;
-    const mockJwt = `sd-jwt-${Date.now()}-${Math.random().toString(36).substring(2)}`;
-    if (typeof window !== "undefined") {
-      localStorage.setItem("sd_auth_token", mockJwt);
-      localStorage.setItem("sd_user_profile", JSON.stringify(profile));
-      sessionStorage.removeItem("sd_explicit_sign_out");
-    }
-    this.notifyListeners(profile);
-    return profile;
+  signInAsGuest(): UserProfile {
+    throw new Error(
+      "Guest access is disabled. Please sign in with your Google account."
+    );
   }
 
   // Alias for backward compatibility

@@ -56,7 +56,7 @@ export function Dashboard({ navigate }: { navigate: (r: Route) => void }) {
     };
   }, []);
 
-  const isReal = Boolean(latest.id && latest.id.startsWith("AN-") && latest.id.length > 8 && latest.id !== "AN-2041");
+  const isReal = Boolean(latest.id && latest.id.startsWith("AN-") && latest.id.length > 8);
   const primaryImg = isReal && latest.primary_image_path
     ? (latest.primary_image_path.startsWith("http") || latest.primary_image_path.startsWith("/api")
       ? latest.primary_image_path
@@ -108,7 +108,7 @@ export function Dashboard({ navigate }: { navigate: (r: Route) => void }) {
 
             <SatImage
               src={primaryImg}
-              bbox={REGIONS.palmJumeirah}
+              bbox={REGIONS.urbanWater}
               className="aspect-[16/10] w-full"
             >
               {evidenceImg ? (
@@ -121,19 +121,19 @@ export function Dashboard({ navigate }: { navigate: (r: Route) => void }) {
               ) : null}
               <OverlayGrid />
               <ScaleTag>
-                {isReal ? "Sentinel-2 / World Imagery · Sub-Meter Multi-Spectral" : "Palm Jumeirah · 0.5 m/px High Clarity · EPSG:4326"}
+                {isReal ? "Sentinel-2 / World Imagery · Sub-Meter Multi-Spectral" : "Hussain Sagar · 10 m/px Multispectral · EPSG:4326"}
               </ScaleTag>
               <span className="mono absolute bottom-2 right-2 rounded-sm bg-[#141c18]/90 border border-[#283630] px-1.5 py-0.5 text-[9.5px] text-[#bebebe]">
-                {isReal ? "Active AOI Observation" : "Dubai Palm Jumeirah (25.11° N, 55.13° E)"}
+                {isReal ? "Active AOI Observation" : "Hyderabad (17.42° N, 78.47° E)"}
               </span>
             </SatImage>
 
             {/* Restrained legend */}
             <div className="flex flex-wrap items-center gap-4 border-t border-border px-3 py-2">
-              <Legend c="#4dbe55" label={isReal ? "Active Vegetation / Built-up Grounding" : "Residential Fronds / Built Infrastructure"} />
-              <Legend c="#698696" label={isReal ? "Water Body / SAR Extent" : "Arabian Gulf Deepwater Channels"} />
-              <Legend c="#79ed91" label={isReal ? "High-Confidence Spectral Feature" : "Marina Moorings & Breakwater Edge"} />
-              <Legend c="#71776d" label={isReal ? "Unchanged Slate Baseline" : "Stable Baseline Coastline"} />
+              <Legend c="#4dbe55" label={isReal ? "Active Vegetation / Built-up Grounding" : "Urban Built-up Infrastructure"} />
+              <Legend c="#698696" label={isReal ? "Water Body / SAR Extent" : "Hussain Sagar Lake Surface"} />
+              <Legend c="#79ed91" label={isReal ? "High-Confidence Spectral Feature" : "High-Confidence Spectral Boundary"} />
+              <Legend c="#71776d" label={isReal ? "Unchanged Slate Baseline" : "Stable Baseline Terrain"} />
               <span className="mono ml-auto text-[10.5px] text-muted-foreground">
                 {isReal ? "Real Model Output" : "Demonstration Scene · Sub-Meter Clarity"}
               </span>

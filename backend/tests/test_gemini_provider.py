@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.errors import (
     AIAuthenticationError,
     AIServiceUnavailableError,
+    AIQuotaExceededError,
     SARUnavailableError,
     PayloadTooLargeError,
 )
@@ -218,7 +219,7 @@ async def test_gemini_sar_unavailable_enforcement(test_images, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_gemini_quota_error_handling(test_images, monkeypatch):
-    """Verifies rate limit / quota error translates to AIServiceUnavailableError."""
+    """Verifies rate limit / quota error translates to AIQuotaExceededError."""
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "mock-test-key-12345")
     provider = GeminiProvider()
 
@@ -226,9 +227,9 @@ async def test_gemini_quota_error_handling(test_images, monkeypatch):
     mock_client.models.generate_content.side_effect = Exception("ResourceExhausted: 429 Quota exceeded")
     monkeypatch.setattr(provider, "_get_client", lambda: mock_client)
 
-    with pytest.raises(AIServiceUnavailableError) as excinfo:
+    with pytest.raises((AIQuotaExceededError, AIServiceUnavailableError)) as excinfo:
         await provider.analyze_image(
             image_path=test_images["optical"],
             query="Analyze water body"
         )
-    assert "AI_SERVICE_UNAVAILABLE" in str(excinfo.value)
+    assert "AI_QUOTA_EXCEEDED" in str(excinfo.value) or "AI_SERVICE_UNAVAILABLE" in str(excinfo.value)

@@ -21,15 +21,15 @@ export type Analysis = {
 
 export const analyses: Analysis[] = [
   {
-    id: "AN-2041",
-    query: "High-resolution coastal monitoring and infrastructure audit on Palm Jumeirah.",
-    task: "Bi-Temporal Change",
-    input: "Before + After",
+    id: "AN-HYD-01",
+    query: "Describe the major land-cover types and water bodies visible in this area.",
+    task: "Single-Image VQA",
+    input: "Single image",
     date: "2026-09-21",
     time: "14:30",
     confidence: "High",
     status: "Complete",
-    answer: "Sub-meter multispectral analysis reveals precision-engineered marine fronds, high-density beachfront residential infrastructure, active yacht berths, and stabilized deep-water tidal navigation channels with no coastal erosion.",
+    answer: "Multispectral analysis of the Hyderabad AOI reveals dense urban built-up coverage (70-75%), the contiguous central water body of Hussain Sagar Lake (15-20%), and surrounding green infrastructure including Lumbini Park and Begumpet airfield.",
   },
   {
     id: "AN-2038",

@@ -22,41 +22,12 @@ const PRESETS = [
   { name: "Rotterdam", fullName: "Rotterdam Port", lat: 51.924, lon: 4.477, zoom: 12 },
 ];
 
-export const WAYBACK_YEAR_RELEASES: Record<number, string> = {
-  2014: "5844",
-  2015: "28163",
-  2016: "18966",
-  2017: "25521",
-  2018: "23448",
-  2019: "4756",
-  2020: "29260",
-  2021: "26120",
-  2022: "45134",
-  2023: "56102",
-  2024: "16453",
-  2025: "13192",
-  2026: "26334",
-};
-
-export function getWaybackTileUrl(targetYear: number): string {
-  const releaseId = WAYBACK_YEAR_RELEASES[targetYear] || WAYBACK_YEAR_RELEASES[2024];
-  return `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/${releaseId}/{z}/{y}/{x}`;
-}
-
-export const isSarScene = (s?: { sensor?: string; collection?: string; platform?: string; scene_id?: string } | null): boolean => {
-  if (!s) return false;
-  const sensor = (s.sensor || "").toLowerCase();
-  const col = (s.collection || "").toLowerCase();
-  const plat = (s.platform || "").toLowerCase();
-  const id = (s.scene_id || "").toLowerCase();
-  return sensor.includes("sar") || col.includes("sentinel-1") || col.includes("grd") || plat.includes("sentinel-1") || id.startsWith("s1");
-};
+import { isSarScene } from "../lib/geoUtils";
 
 export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const baseTileLayerRef = useRef<L.TileLayer | null>(null);
-  const sceneOverlayRef = useRef<L.ImageOverlay | null>(null);
   const aoiLayerRef = useRef<L.Rectangle | null>(null);
   const footprintsLayerRef = useRef<L.LayerGroup | null>(null);
   const clickMarkerRef = useRef<L.CircleMarker | null>(null);
@@ -81,7 +52,6 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   // Dual-scene filter state for fusion mode
   const [fusionTarget, setFusionTarget] = useState<"optical" | "sar">("optical");
   const [sarScenes, setSarScenes] = useState<Scene[]>([]);
-  const [showSceneOverlay, setShowSceneOverlay] = useState<boolean>(true);
 
   // Scene & AOI State
   const [scenes, setScenes] = useState<Scene[]>([]);
@@ -104,48 +74,6 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
     }
   }, [mode]);
 
-  // Active viewing year on the map
-  const activeViewingYear = mode === "temporal"
-    ? (temporalTarget === "before" ? beforeYear : afterYear)
-    : year;
-
-  // Active scene for current view
-  const activeScene = mode === "temporal"
-    ? (temporalTarget === "before" ? secondaryScene : selectedScene)
-    : selectedScene;
-
-  // Dynamically update map's satellite tile layer when viewing year changes
-  useEffect(() => {
-    if (!mapRef.current || !baseTileLayerRef.current) return;
-    const tileUrl = getWaybackTileUrl(activeViewingYear);
-    baseTileLayerRef.current.setUrl(tileUrl);
-  }, [activeViewingYear]);
-
-  // Overlay authentic satellite scene quicklook when available
-  useEffect(() => {
-    if (!mapRef.current) return;
-
-    if (sceneOverlayRef.current) {
-      mapRef.current.removeLayer(sceneOverlayRef.current);
-      sceneOverlayRef.current = null;
-    }
-
-    if (showSceneOverlay && activeScene?.preview_url && activeScene.bbox && activeScene.bbox.length === 4) {
-      const bounds = L.latLngBounds(
-        [activeScene.bbox[1], activeScene.bbox[0]],
-        [activeScene.bbox[3], activeScene.bbox[2]]
-      );
-      try {
-        sceneOverlayRef.current = L.imageOverlay(activeScene.preview_url, bounds, {
-          opacity: 0.85,
-          interactive: false,
-        }).addTo(mapRef.current);
-      } catch (err) {
-        console.warn("Failed to overlay scene preview:", err);
-      }
-    }
-  }, [activeScene, showSceneOverlay]);
-
   // Initialize Leaflet Map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -162,12 +90,15 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       maxBoundsViscosity: 1.0,
     });
 
-    // Satellite imagery base tiles (Esri Wayback for chosen active observation year)
-    const initialYear = mode === "temporal" ? (temporalTarget === "before" ? beforeYear : afterYear) : year;
-    const tileLayer = L.tileLayer(getWaybackTileUrl(initialYear), {
-      attribution: `Satellite Tiles © Esri Wayback (${initialYear})`,
-      maxZoom: 18,
-    }).addTo(map);
+    // Satellite imagery basemap (Esri World Imagery - genuine live global satellite/aerial layer)
+    const tileLayer = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      {
+        attribution:
+          "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+        maxZoom: 18,
+      }
+    ).addTo(map);
     baseTileLayerRef.current = tileLayer;
 
     footprintsLayerRef.current = L.layerGroup().addTo(map);
@@ -236,7 +167,6 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       map.remove();
       mapRef.current = null;
       baseTileLayerRef.current = null;
-      sceneOverlayRef.current = null;
     };
   }, []);
 
@@ -317,6 +247,8 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       }
       setAoi(preview);
       setErrorMsg(null);
+      // Automatically query and select the best authentic satellite scene for this AOI
+      searchScenesForAoi(preview, currentReqId);
     } catch (err: any) {
       // Discard stale error if a newer request was dispatched
       if (currentReqId !== aoiRequestIdRef.current) {
@@ -361,9 +293,8 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   };
 
   // Search Real Satellite Scenes from Backend STAC
-  // Search Real Satellite Scenes from Backend STAC
-  const handleSearchScenes = async () => {
-    if (!aoi) return;
+  const searchScenesForAoi = async (targetAoi: AOIPreview, reqId?: number) => {
+    if (!targetAoi) return;
     setSearching(true);
     setErrorMsg(null);
 
@@ -375,14 +306,14 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       try {
         const [foundBefore, foundAfter] = await Promise.all([
           api.earth.searchScenes({
-            bbox: aoi.bbox,
+            bbox: targetAoi.bbox,
             year: beforeYear,
             sensor: targetSensor,
             cloud_cover_max: targetSensor === "optical" ? cloudCoverMax : undefined,
             limit: 6,
           }),
           api.earth.searchScenes({
-            bbox: aoi.bbox,
+            bbox: targetAoi.bbox,
             year: afterYear,
             sensor: targetSensor,
             cloud_cover_max: targetSensor === "optical" ? cloudCoverMax : undefined,
@@ -390,6 +321,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
           }),
         ]);
 
+        if (reqId && reqId !== aoiRequestIdRef.current) return;
         setBeforeScenes(foundBefore);
         setAfterScenes(foundAfter);
 
@@ -399,10 +331,10 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         if (bestBefore) setSecondaryScene(bestBefore);
         if (bestAfter) setSelectedScene(bestAfter);
 
-        if (bestAfter && aoi) {
-          onSelectSceneAndAOI(bestAfter, aoi, bestBefore || undefined);
-        } else if (bestBefore && aoi) {
-          onSelectSceneAndAOI(bestBefore, aoi, undefined);
+        if (bestAfter && targetAoi) {
+          onSelectSceneAndAOI(bestAfter, targetAoi, bestBefore || undefined);
+        } else if (bestBefore && targetAoi) {
+          onSelectSceneAndAOI(bestBefore, targetAoi, undefined);
         }
 
         // Render footprints on map
@@ -422,11 +354,14 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
           });
         }
       } catch (err: any) {
+        if (reqId && reqId !== aoiRequestIdRef.current) return;
         setErrorMsg(err.message || "No satellite scenes found for the selected years.");
         setBeforeScenes([]);
         setAfterScenes([]);
       } finally {
-        setSearching(false);
+        if (!reqId || reqId === aoiRequestIdRef.current) {
+          setSearching(false);
+        }
       }
       return;
     }
@@ -435,20 +370,21 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       try {
         const [foundOptical, foundSar] = await Promise.all([
           api.earth.searchScenes({
-            bbox: aoi.bbox,
+            bbox: targetAoi.bbox,
             year: year,
             sensor: "optical",
             cloud_cover_max: cloudCoverMax,
             limit: 6,
           }),
           api.earth.searchScenes({
-            bbox: aoi.bbox,
+            bbox: targetAoi.bbox,
             year: year,
             sensor: "sar",
             limit: 6,
           }),
         ]);
 
+        if (reqId && reqId !== aoiRequestIdRef.current) return;
         setScenes(foundOptical);
         setSarScenes(foundSar);
 
@@ -458,10 +394,10 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         if (bestOpt) setSelectedScene(bestOpt);
         if (bestSar) setSecondaryScene(bestSar);
 
-        if (bestOpt && aoi) {
-          onSelectSceneAndAOI(bestOpt, aoi, bestSar || undefined);
-        } else if (bestSar && aoi) {
-          onSelectSceneAndAOI(bestSar, aoi, undefined);
+        if (bestOpt && targetAoi) {
+          onSelectSceneAndAOI(bestOpt, targetAoi, bestSar || undefined);
+        } else if (bestSar && targetAoi) {
+          onSelectSceneAndAOI(bestSar, targetAoi, undefined);
         }
 
         // Render footprints on map: optical in green, sar in slate-blue
@@ -481,30 +417,34 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
           });
         }
       } catch (err: any) {
+        if (reqId && reqId !== aoiRequestIdRef.current) return;
         setErrorMsg(err.message || "No satellite scenes found for the selected area.");
         setScenes([]);
         setSarScenes([]);
       } finally {
-        setSearching(false);
+        if (!reqId || reqId === aoiRequestIdRef.current) {
+          setSearching(false);
+        }
       }
       return;
     }
 
     try {
       const found = await api.earth.searchScenes({
-        bbox: aoi.bbox,
+        bbox: targetAoi.bbox,
         year: year,
         sensor: targetSensor,
         cloud_cover_max: targetSensor === "optical" ? cloudCoverMax : undefined,
         limit: 8,
       });
 
+      if (reqId && reqId !== aoiRequestIdRef.current) return;
       setScenes(found);
 
       if (found.length > 0) {
         setSelectedScene(found[0]);
-        if (aoi) {
-          onSelectSceneAndAOI(found[0], aoi);
+        if (targetAoi) {
+          onSelectSceneAndAOI(found[0], targetAoi);
         }
       }
 
@@ -524,10 +464,19 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         });
       }
     } catch (err: any) {
+      if (reqId && reqId !== aoiRequestIdRef.current) return;
       setErrorMsg(err.message || "No scenes found for the selected criteria.");
       setScenes([]);
     } finally {
-      setSearching(false);
+      if (!reqId || reqId === aoiRequestIdRef.current) {
+        setSearching(false);
+      }
+    }
+  };
+
+  const handleSearchScenes = async () => {
+    if (aoi) {
+      await searchScenesForAoi(aoi);
     }
   };
 
@@ -913,7 +862,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
                       ? "bg-primary text-primary-foreground shadow-xs ring-1 ring-primary"
                       : "text-muted-foreground hover:text-foreground"
                   )}
-                  title={`View ${beforeYear} Baseline satellite imagery on map`}
+                  title={`Select ${beforeYear} Baseline scene`}
                 >
                   <span>◀ Before ({beforeYear})</span>
                 </button>
@@ -926,7 +875,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
                       ? "bg-accent text-accent-foreground shadow-xs ring-1 ring-accent"
                       : "text-muted-foreground hover:text-foreground"
                   )}
-                  title={`View ${afterYear} Target satellite imagery on map`}
+                  title={`Select ${afterYear} Target scene`}
                 >
                   <span>After ({afterYear}) ▶</span>
                 </button>
@@ -934,17 +883,15 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
             </div>
           ) : (
             <div className="flex items-center gap-2 rounded-md border border-border bg-card/95 px-3 py-1.5 shadow-md backdrop-blur">
-              <span className="mono text-[11px] text-muted-foreground">Map Satellite Year:</span>
+              <span className="mono text-[11px] text-muted-foreground">Scene Search Year:</span>
               <Badge tone="accent">{year}</Badge>
             </div>
           )}
 
-          {/* Active Satellite Archive Status Tag */}
+          {/* Satellite View Status Tag */}
           <div className="mono rounded border border-border/80 bg-card/90 px-2.5 py-0.5 text-[10.5px] text-muted-foreground shadow-xs backdrop-blur flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--ok)] animate-pulse" />
-            <span>Active Satellite: <strong className="text-foreground font-semibold">{activeViewingYear} Archive</strong></span>
-            <span className="text-border">·</span>
-            <span className="text-[10px]">Esri Wayback / Sentinel</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--ok)]" />
+            <span><strong className="text-foreground font-semibold">Satellite View</strong></span>
           </div>
         </div>
       </div>

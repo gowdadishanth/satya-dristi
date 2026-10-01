@@ -1,10 +1,9 @@
 import { authService, isJwtExpired } from "./firebase";
-import { mockService } from "./mockService";
 
 /**
- * Satya Dristi Resilient API Client Service Layer
- * Connects frontend to the FastAPI backend with seamless Client-Side Edge Mock Fallback.
- * Guarantees 100% functionality on Vercel and standalone environments.
+ * Satya Dristi API Client Service Layer
+ * Connects frontend directly to the FastAPI backend.
+ * All operations require authentic backend execution and valid Firebase authentication.
  */
 
 const RAW_API_BASE = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
@@ -15,7 +14,7 @@ const API_BASE = hasCustomBackend
 
 export async function getAuthToken(forceRefresh = false): Promise<string | null> {
   if (typeof window === "undefined") return null;
-  const cached = localStorage.getItem("sd_auth_token");
+  let cached = localStorage.getItem("sd_auth_token");
   if (!forceRefresh && cached && !isJwtExpired(cached, 30)) {
     return cached;
   }
@@ -30,7 +29,7 @@ export async function getAuthToken(forceRefresh = false): Promise<string | null>
   if (cached && isJwtExpired(cached, 0)) {
     console.warn("Cached token expired and refresh failed. Clearing stale token.");
     localStorage.removeItem("sd_auth_token");
-    return null;
+    cached = null;
   }
   return cached;
 }
@@ -256,9 +255,6 @@ export function getAnalysisImageUrl(
   analysisId: string,
   type: "primary" | "before" | "after" | "sar" | "evidence"
 ): string {
-  if (!hasCustomBackend) {
-    return "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/14/7386/11762";
-  }
   const token = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
   const validToken = token && !isJwtExpired(token, 0) ? token : null;
   const tokenParam = validToken ? `?token=${encodeURIComponent(validToken)}` : "";
@@ -272,10 +268,6 @@ export async function downloadReportPdf(
   reportId: string,
   customFilename?: string
 ): Promise<string> {
-  if (!hasCustomBackend) {
-    return mockService.reports.downloadPdf(reportId, customFilename);
-  }
-
   try {
     const token = await getAuthToken();
     const endpoint = `${API_BASE}/reports/${encodeURIComponent(reportId)}/download`;
@@ -335,8 +327,8 @@ export async function downloadReportPdf(
 
     return finalFilename;
   } catch (err) {
-    console.warn("Server PDF download failed, falling back to client-side jsPDF engine:", err);
-    return mockService.reports.downloadPdf(reportId, customFilename);
+    console.error("Server PDF download failed:", err);
+    throw err;
   }
 }
 
@@ -344,10 +336,6 @@ export async function downloadReportJson(
   reportId: string,
   customFilename?: string
 ): Promise<string> {
-  if (!hasCustomBackend) {
-    return mockService.reports.downloadJson(reportId, customFilename);
-  }
-
   try {
     const token = await getAuthToken();
     const endpoint = `${API_BASE}/reports/${encodeURIComponent(reportId)}/json`;
@@ -401,8 +389,8 @@ export async function downloadReportJson(
 
     return finalFilename;
   } catch (err) {
-    console.warn("Server JSON download failed, falling back to client-side generator:", err);
-    return mockService.reports.downloadJson(reportId, customFilename);
+    console.error("Server JSON download failed:", err);
+    throw err;
   }
 }
 
@@ -421,26 +409,7 @@ export async function downloadReportFile(
 export const api = {
   auth: {
     getMe: async () => {
-      if (!hasCustomBackend) {
-        const u = authService.getCurrentUser();
-        return {
-          uid: u?.uid || "usr-satya-analyst",
-          email: u?.email || "analyst@satya-dristi.gov.in",
-          name: u?.name || "Lead EO Analyst",
-          picture: u?.picture || "",
-        };
-      }
-      try {
-        return await request<{ uid: string; email: string; name: string; picture: string }>("/auth/me");
-      } catch {
-        const u = authService.getCurrentUser();
-        return {
-          uid: u?.uid || "usr-satya-analyst",
-          email: u?.email || "analyst@satya-dristi.gov.in",
-          name: u?.name || "Lead EO Analyst",
-          picture: u?.picture || "",
-        };
-      }
+      return await request<{ uid: string; email: string; name: string; picture: string }>("/auth/me");
     },
   },
 
@@ -453,53 +422,22 @@ export const api = {
       cloud_cover_max?: number;
       limit?: number;
     }): Promise<Scene[]> => {
-      if (!hasCustomBackend) {
-        return mockService.earth.searchScenes(params);
-      }
-      try {
-        return await request<Scene[]>("/earth/scenes/search", { method: "POST", body: JSON.stringify(params) });
-      } catch (err) {
-        console.warn("Backend scenes search failed, using mock fallback:", err);
-        return mockService.earth.searchScenes(params);
-      }
+      return await request<Scene[]>("/earth/scenes/search", { method: "POST", body: JSON.stringify(params) });
     },
 
     getScene: async (sceneId: string): Promise<Scene> => {
-      if (!hasCustomBackend) {
-        const scenes = await mockService.earth.searchScenes({});
-        return scenes.find((s) => s.scene_id === sceneId) || scenes[0];
-      }
-      try {
-        return await request<Scene>(`/earth/scenes/${sceneId}`);
-      } catch {
-        const scenes = await mockService.earth.searchScenes({});
-        return scenes.find((s) => s.scene_id === sceneId) || scenes[0];
-      }
+      return await request<Scene>(`/earth/scenes/${sceneId}`);
     },
 
     previewAOI: async (aoi: { geometry?: any; bbox?: number[] }): Promise<AOIPreview> => {
-      if (!hasCustomBackend) {
-        return mockService.earth.previewAOI(aoi);
-      }
-      try {
-        return await request<AOIPreview>("/earth/aoi/preview", { method: "POST", body: JSON.stringify(aoi) });
-      } catch {
-        return mockService.earth.previewAOI(aoi);
-      }
+      return await request<AOIPreview>("/earth/aoi/preview", { method: "POST", body: JSON.stringify(aoi) });
     },
 
     checkCompatibility: async (data: { scene_ids?: string[]; aoi?: any }) => {
-      if (!hasCustomBackend) {
-        return mockService.earth.checkCompatibility();
-      }
-      try {
-        return await request<{ compatible: boolean; reason: string; overlap_pct: number }>("/earth/compatibility", {
-          method: "POST",
-          body: JSON.stringify(data),
-        });
-      } catch {
-        return mockService.earth.checkCompatibility();
-      }
+      return await request<{ compatible: boolean; reason: string; overlap_pct: number }>("/earth/compatibility", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
     },
   },
 
@@ -514,105 +452,45 @@ export const api = {
       optical_scene_id?: string;
       sar_scene_id?: string;
     }): Promise<AnalysisJobStatus> => {
-      if (!hasCustomBackend) {
-        return mockService.analyses.create(data);
-      }
-      try {
-        return await request<AnalysisJobStatus>("/analyses", { method: "POST", body: JSON.stringify(data) });
-      } catch (err) {
-        console.warn("Backend analysis creation failed, using mock fallback:", err);
-        return mockService.analyses.create(data);
-      }
+      return await request<AnalysisJobStatus>("/analyses", { method: "POST", body: JSON.stringify(data) });
     },
 
     createUpload: async (formData: FormData): Promise<AnalysisJobStatus> => {
-      if (!hasCustomBackend) {
-        return mockService.analyses.createUpload(formData);
-      }
-      try {
-        return await request<AnalysisJobStatus>("/analyses/upload", { method: "POST", body: formData });
-      } catch (err) {
-        console.warn("Backend upload analysis failed, using mock fallback:", err);
-        return mockService.analyses.createUpload(formData);
-      }
+      return await request<AnalysisJobStatus>("/analyses/upload", { method: "POST", body: formData });
     },
 
     getStatus: async (analysisId: string): Promise<AnalysisJobStatus> => {
-      if (!hasCustomBackend) {
-        return mockService.analyses.getStatus(analysisId);
-      }
-      try {
-        return await request<AnalysisJobStatus>(`/analyses/${analysisId}/status`);
-      } catch {
-        return mockService.analyses.getStatus(analysisId);
-      }
+      return await request<AnalysisJobStatus>(`/analyses/${analysisId}/status`);
     },
 
     getDetail: async (analysisId: string): Promise<AnalysisRecord> => {
-      if (!hasCustomBackend) {
-        return mockService.analyses.getDetail(analysisId);
-      }
-      try {
-        return await request<AnalysisRecord>(`/analyses/${analysisId}`);
-      } catch {
-        return mockService.analyses.getDetail(analysisId);
-      }
+      return await request<AnalysisRecord>(`/analyses/${analysisId}`);
     },
 
     delete: async (analysisId: string): Promise<{ deleted: boolean; analysis_id: string }> => {
-      if (!hasCustomBackend) {
-        return mockService.analyses.delete(analysisId);
-      }
-      try {
-        return await request<{ deleted: boolean; analysis_id: string }>(`/analyses/${analysisId}`, {
-          method: "DELETE",
-        });
-      } catch {
-        return mockService.analyses.delete(analysisId);
-      }
+      return await request<{ deleted: boolean; analysis_id: string }>(`/analyses/${analysisId}`, {
+        method: "DELETE",
+      });
     },
   },
 
   history: {
     list: async (params?: { task?: string; q?: string; limit?: number }): Promise<AnalysisRecord[]> => {
-      if (!hasCustomBackend) {
-        return mockService.history.list(params);
-      }
-      try {
-        const qp = new URLSearchParams();
-        if (params?.task) qp.append("task", params.task);
-        if (params?.q) qp.append("q", params.q);
-        if (params?.limit) qp.append("limit", String(params.limit));
-        return await request<AnalysisRecord[]>(`/history?${qp.toString()}`);
-      } catch (err) {
-        console.warn("Backend history list failed, using mock fallback:", err);
-        return mockService.history.list(params);
-      }
+      const qp = new URLSearchParams();
+      if (params?.task) qp.append("task", params.task);
+      if (params?.q) qp.append("q", params.q);
+      if (params?.limit) qp.append("limit", String(params.limit));
+      return await request<AnalysisRecord[]>(`/history?${qp.toString()}`);
     },
   },
 
   reports: {
     list: async (): Promise<ReportItem[]> => {
-      if (!hasCustomBackend) {
-        return mockService.reports.list();
-      }
-      try {
-        return await request<ReportItem[]>("/reports");
-      } catch (err) {
-        console.warn("Backend reports list failed, using mock fallback:", err);
-        return mockService.reports.list();
-      }
+      return await request<ReportItem[]>("/reports");
     },
 
     getDetail: async (reportId: string): Promise<ReportItem> => {
-      if (!hasCustomBackend) {
-        return mockService.reports.getDetail(reportId);
-      }
-      try {
-        return await request<ReportItem>(`/reports/${reportId}`);
-      } catch {
-        return mockService.reports.getDetail(reportId);
-      }
+      return await request<ReportItem>(`/reports/${reportId}`);
     },
 
     downloadPdf: async (reportId: string, filename?: string): Promise<string> => {
@@ -626,15 +504,7 @@ export const api = {
 
   system: {
     getHealth: async (): Promise<SystemHealth> => {
-      if (!hasCustomBackend) {
-        return mockService.system.getHealth();
-      }
-      try {
-        return await request<SystemHealth>("/system/health");
-      } catch (err) {
-        console.warn("Backend health check failed, using mock fallback:", err);
-        return mockService.system.getHealth();
-      }
+      return await request<SystemHealth>("/system/health");
     },
   },
 };

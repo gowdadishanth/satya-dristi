@@ -137,28 +137,6 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             </p>
           )}
 
-          {/* Guest Analyst One-Click Login */}
-          <div className="relative flex items-center justify-center my-2">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-border/60" />
-            </div>
-            <div className="relative bg-card px-2.5 text-[10.5px] uppercase tracking-wider text-muted-foreground font-mono">
-              or instant evaluation
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              const guest = authService.signInAsGuest();
-              if (onSuccess) onSuccess(guest);
-              onClose();
-            }}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-primary/40 bg-primary/10 text-primary font-medium hover:bg-primary/20 transition-all text-xs cursor-pointer shadow-xs active:scale-[0.99]"
-          >
-            <IconCheck className="h-4 w-4 text-ok" />
-            <span className="font-semibold">Sign in as Guest Analyst (Instant Access)</span>
-          </button>
 
           {/* Configuration prompt if Web API key is needed */}
           {showApiKeyConfig && (

@@ -17,6 +17,9 @@ from app.core.config import settings
 from app.core.errors import (
     AIAuthenticationError,
     AIServiceUnavailableError,
+    AIQuotaExceededError,
+    AIRequestFailedError,
+    AIInputTooLargeError,
     SARUnavailableError,
     PayloadTooLargeError,
     AnalysisFailedError,
@@ -500,7 +503,7 @@ class GeminiProvider(AIProvider):
                 if "api key" in err_msg or "unauthorized" in err_msg or "401" in err_msg or "403" in err_msg:
                     raise AIAuthenticationError("Invalid or unauthorized Gemini API key. Please check your GEMINI_API_KEY in backend/.env.")
                 elif "too large" in err_msg or "payload" in err_msg or "413" in err_msg:
-                    raise PayloadTooLargeError("Satellite imagery raster exceeds Gemini API size limits. Please select a smaller AOI.")
+                    raise AIInputTooLargeError("Satellite imagery raster exceeds Gemini API size limits. Please select a smaller AOI.")
 
                 # For 503 (high demand) or 429 (quota/rate limit), wait and retry
                 if attempt < max_retries - 1:
@@ -515,11 +518,11 @@ class GeminiProvider(AIProvider):
                     "Gemini AI model is currently experiencing temporary high demand (503). Please wait a few seconds and try again."
                 )
             elif "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
-                raise AIServiceUnavailableError(
-                    "Gemini AI rate limit reached. Please wait a moment before resubmitting your query."
+                raise AIQuotaExceededError(
+                    "Gemini AI rate limit or quota exceeded. Please wait a moment before resubmitting your query."
                 )
             else:
-                raise AIServiceUnavailableError(f"Gemini inference call failed: {err_str}")
+                raise AIRequestFailedError(f"Gemini inference call failed: {err_str}")
 
         # Parse structured JSON response
         try:

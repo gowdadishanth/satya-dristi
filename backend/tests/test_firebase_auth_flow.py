@@ -47,7 +47,7 @@ def test_successful_firebase_user_a_auth(mock_verify):
         "picture": GOOGLE_USER_A["picture"],
     }
 
-    res = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer fake_signed_token_a"})
+    res = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer valid.jwt.token_a"})
     assert res.status_code == 200
     data = res.json()
     assert data["uid"] == GOOGLE_USER_A["uid"]
@@ -68,7 +68,7 @@ def test_account_switching_between_google_accounts(mock_verify):
         "name": GOOGLE_USER_A["name"],
         "picture": GOOGLE_USER_A["picture"],
     }
-    res_a = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer token_a"})
+    res_a = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer valid.jwt.token_a"})
     assert res_a.status_code == 200
     assert res_a.json()["uid"] == GOOGLE_USER_A["uid"]
 
@@ -79,7 +79,7 @@ def test_account_switching_between_google_accounts(mock_verify):
         "name": GOOGLE_USER_B["name"],
         "picture": GOOGLE_USER_B["picture"],
     }
-    res_b = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer token_b"})
+    res_b = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer valid.jwt.token_b"})
     assert res_b.status_code == 200
     assert res_b.json()["uid"] == GOOGLE_USER_B["uid"]
     assert res_b.json()["email"] == GOOGLE_USER_B["email"]
@@ -92,10 +92,10 @@ def test_user_data_isolation_between_switched_accounts(mock_verify):
 
     # User A accesses their analyses
     mock_verify.return_value = {"uid": GOOGLE_USER_A["uid"], "email": GOOGLE_USER_A["email"]}
-    res_a = client.get("/api/v1/history", headers={"Authorization": "Bearer token_a"})
+    res_a = client.get("/api/v1/history", headers={"Authorization": "Bearer valid.jwt.token_a"})
     assert res_a.status_code == 200
 
     # User B accesses their analyses
     mock_verify.return_value = {"uid": GOOGLE_USER_B["uid"], "email": GOOGLE_USER_B["email"]}
-    res_b = client.get("/api/v1/history", headers={"Authorization": "Bearer token_b"})
+    res_b = client.get("/api/v1/history", headers={"Authorization": "Bearer valid.jwt.token_b"})
     assert res_b.status_code == 200
