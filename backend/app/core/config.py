@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from typing import Any, List
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -14,6 +16,22 @@ class Settings(BaseSettings):
     
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    return json.loads(v)
+                except Exception:
+                    pass
+            return [x.strip() for x in v.split(",") if x.strip()]
+        elif isinstance(v, (list, tuple)):
+            return [str(x) for x in v]
+        return ["*"]
     
     # Storage Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
@@ -31,6 +49,7 @@ class Settings(BaseSettings):
     FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "satya-dristi")
     FIREBASE_CREDENTIALS_PATH: str = os.getenv("FIREBASE_CREDENTIALS_PATH", "")
     GOOGLE_APPLICATION_CREDENTIALS: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+    FIREBASE_CREDENTIALS_JSON: str = os.getenv("FIREBASE_CREDENTIALS_JSON", "")
     
     # AI Provider & Gemini API Configuration
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "gemini")

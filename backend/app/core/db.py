@@ -15,10 +15,16 @@ logger = logging.getLogger(__name__)
 _firestore_client = None
 try:
     from google.cloud import firestore
+    cred_json = getattr(settings, "FIREBASE_CREDENTIALS_JSON", "") or os.getenv("FIREBASE_CREDENTIALS_JSON", "")
     cred_file = settings.FIREBASE_CREDENTIALS_PATH or settings.GOOGLE_APPLICATION_CREDENTIALS
     if cred_file and os.path.exists(cred_file):
         _firestore_client = firestore.Client.from_service_account_json(cred_file)
         logger.info("Connected to Google Cloud Firestore via service account certificate.")
+    elif cred_json and cred_json.strip().startswith("{"):
+        import json
+        cred_dict = json.loads(cred_json)
+        _firestore_client = firestore.Client.from_service_account_info(cred_dict)
+        logger.info("Connected to Google Cloud Firestore via service account JSON from environment.")
     elif os.getenv("FIRESTORE_EMULATOR_HOST"):
         _firestore_client = firestore.Client(project=settings.FIREBASE_PROJECT_ID)
         logger.info("Connected to Firestore emulator.")

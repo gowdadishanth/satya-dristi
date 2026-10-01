@@ -17,11 +17,18 @@ def init_firebase():
     if _firebase_initialized:
         return
     try:
+        cred_json = settings.FIREBASE_CREDENTIALS_JSON or os.getenv("FIREBASE_CREDENTIALS_JSON", "")
         cred_path = settings.FIREBASE_CREDENTIALS_PATH or settings.GOOGLE_APPLICATION_CREDENTIALS
         if cred_path and os.path.exists(cred_path):
             cred = credentials.Certificate(cred_path)
             firebase_admin.initialize_app(cred)
             logger.info("Firebase Admin initialized with certificate: %s", cred_path)
+        elif cred_json and cred_json.strip().startswith("{"):
+            import json
+            cred_dict = json.loads(cred_json)
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
+            logger.info("Firebase Admin initialized with credentials JSON from environment.")
         else:
             # Initialize with default credentials or project ID
             firebase_admin.initialize_app(options={"projectId": settings.FIREBASE_PROJECT_ID})
