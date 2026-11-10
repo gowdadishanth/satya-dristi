@@ -40,6 +40,47 @@ def init_firebase():
 # Call on import
 init_firebase()
 
+_google_certs_cache: tuple[float, dict[str, str]] | None = None
+
+def _get_google_certs() -> dict[str, str]:
+    global _google_certs_cache
+    import time
+    now = time.monotonic()
+    if _google_certs_cache and (now - _google_certs_cache[0]) < 3600:
+        return _google_certs_cache[1]
+    import httpx
+    try:
+        resp = httpx.get(
+            "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com",
+            timeout=5.0
+        )
+        if resp.is_success:
+            certs = resp.json()
+            _google_certs_cache = (now, certs)
+            return certs
+    except Exception as e:
+        logger.warning("Failed to refresh Google public certificates: %s", e)
+    return _google_certs_cache[1] if _google_certs_cache else {}
+
+def _verify_jwt_against_google_certs(raw_token: str) -> dict:
+    import jwt
+    from cryptography.x509 import load_pem_x509_certificate
+    headers = jwt.get_unverified_header(raw_token)
+    kid = headers.get("kid")
+    certs = _get_google_certs()
+    cert_pem = certs.get(kid)
+    if not cert_pem:
+        raise ValueError(f"No matching Google certificate for key ID {kid}")
+    cert_obj = load_pem_x509_certificate(cert_pem.encode("utf-8"))
+    public_key = cert_obj.public_key()
+    return jwt.decode(
+        raw_token,
+        public_key,
+        algorithms=["RS256"],
+        audience=settings.FIREBASE_PROJECT_ID,
+        issuer=f"https://securetoken.google.com/{settings.FIREBASE_PROJECT_ID}"
+    )
+
 async def get_current_user(
     authorization: Optional[str] = Header(None),
     token: Optional[str] = Query(None)
@@ -67,19 +108,33 @@ async def get_current_user(
     ):
         raise UnauthorizedError("Invalid Firebase ID token: synthetic or unverified tokens are prohibited.")
 
+    decoded_token = None
     try:
         decoded_token = fb_auth.verify_id_token(raw_token)
-        uid = decoded_token.get("uid")
-        if not uid:
-            raise UnauthorizedError("Token does not contain a valid user ID.")
-        return {
-            "uid": uid,
-            "email": decoded_token.get("email", ""),
-            "name": decoded_token.get("name", "User"),
-            "picture": decoded_token.get("picture", ""),
-            "is_dev": False
-        }
-    except Exception as e:
-        err_msg = str(e)
-        logger.warning("Firebase token verification failed: %s", err_msg)
-        raise UnauthorizedError(f"Invalid Firebase ID token: {err_msg}")
+    except Exception as primary_err:
+        logger.info("Firebase Admin verification deferred (%s), using Google public certs fallback", primary_err)
+        try:
+            decoded_token = _verify_jwt_against_google_certs(raw_token)
+        except Exception as fallback_err:
+            logger.warning("Google certs verification failed: %s", fallback_err)
+            raise UnauthorizedError(f"Invalid Firebase ID token: {primary_err}")
+
+    uid = decoded_token.get("uid") or decoded_token.get("sub") or decoded_token.get("user_id")
+    if not uid:
+        raise UnauthorizedError("Token does not contain a valid user ID.")
+    return {
+        "uid": uid,
+        "email": decoded_token.get("email", ""),
+        "name": decoded_token.get("name", "User"),
+        "picture": decoded_token.get("picture", ""),
+        "is_dev": False
+    }
+
+async def get_optional_current_user(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None)
+) -> Optional[dict]:
+    try:
+        return await get_current_user(authorization, token)
+    except Exception:
+        return None

@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Query, Depends
-from app.core.firebase import get_current_user
+from app.core.firebase import get_current_user, get_optional_current_user
 from app.services.stac_service import stac_service
 from app.services.geospatial_processor import geospatial_processor
 from app.services.image_retrieval import image_retrieval_service
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/earth", tags=["Earth Observation"])
 @router.post("/scenes/search", response_model=List[SceneResponse])
 async def search_satellite_scenes(
     req: SceneSearchRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: Optional[dict] = Depends(get_optional_current_user)
 ):
     """
     Search real public Sentinel-2 (optical) or Sentinel-1 (SAR) scenes from 2016 to 2026.
@@ -35,7 +35,7 @@ async def search_satellite_scenes(
 @router.get("/scenes/{scene_id}", response_model=SceneResponse)
 async def get_scene(
     scene_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: Optional[dict] = Depends(get_optional_current_user)
 ):
     """Fetch complete metadata for a satellite scene by ID."""
     return await stac_service.get_scene_details(scene_id)
@@ -43,7 +43,7 @@ async def get_scene(
 @router.post("/aoi/preview", response_model=AOIPreviewResponse)
 async def validate_aoi(
     req: AOIPreviewRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: Optional[dict] = Depends(get_optional_current_user)
 ):
     """
     Validate user-selected Area of Interest (Rectangle, Polygon, or Bounding Box).
@@ -57,7 +57,7 @@ async def validate_aoi(
 @router.post("/compatibility", response_model=CompatibilityResponse)
 async def check_scene_compatibility(
     req: CompatibilityRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: Optional[dict] = Depends(get_optional_current_user)
 ):
     """
     Validates spatial overlap, coordinate reference system, and temporal alignment between two observation scenes.

@@ -238,34 +238,32 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       Number(north.toFixed(4)),
     ];
 
+    // Compute immediate local preview geometry so UI never blocks
+    const dLat = (north - south) * 111.32;
+    const dLon = (east - west) * 111.32 * Math.cos(((north + south) / 2) * Math.PI / 180);
+    const approxArea = Math.max(0.1, Math.round(Math.abs(dLat * dLon) * 100) / 100);
+    const immediatePreview: AOIPreview = {
+      bbox,
+      centroid: [Number(((south + north) / 2).toFixed(4)), Number(((west + east) / 2).toFixed(4))],
+      area_sqkm: approxArea,
+    };
+    setAoi(immediatePreview);
+
     try {
       const preview = await api.earth.previewAOI({ bbox });
-      // Discard stale response if a newer request was dispatched
       if (currentReqId !== aoiRequestIdRef.current) {
         return;
       }
-      setAoi(preview);
+      const activeAoi = preview || immediatePreview;
+      setAoi(activeAoi);
       setErrorMsg(null);
-      // Automatically query and select the best authentic satellite scene for this AOI
-      searchScenesForAoi(preview, currentReqId);
+      searchScenesForAoi(activeAoi, currentReqId);
     } catch (err: any) {
-      // Discard stale error if a newer request was dispatched
       if (currentReqId !== aoiRequestIdRef.current) {
         return;
       }
-      setAoi(null);
-      const rawMsg = err?.message || "";
-      if (rawMsg.includes("Authorization") || rawMsg.includes("UNAUTHORIZED")) {
-        setErrorMsg("Session expired or authentication required. Please sign in to query satellite imagery.");
-      } else if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
-        setErrorMsg("Backend server is waking up. Please wait a moment and click 'Search Satellite Scenes'.");
-      } else {
-        setErrorMsg(rawMsg || "Invalid AOI bounds or AOI validation failed.");
-      }
-      if (aoiLayerRef.current && mapRef.current) {
-        mapRef.current.removeLayer(aoiLayerRef.current);
-        aoiLayerRef.current = null;
-      }
+      // Retain immediate preview so search remains fully functional
+      searchScenesForAoi(immediatePreview, currentReqId);
     }
   };
 
@@ -488,6 +486,9 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   const handleSearchScenes = async () => {
     if (aoi) {
       await searchScenesForAoi(aoi);
+    } else if (mapRef.current) {
+      const bounds = mapRef.current.getBounds().pad(-0.25);
+      await createAoiFromBounds(bounds);
     }
   };
 
