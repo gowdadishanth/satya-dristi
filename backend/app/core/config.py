@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
@@ -17,14 +17,14 @@ class Settings(BaseSettings):
     # CORS
     # Explicit local development origins are safe defaults. Production deployments
     # must set CORS_ORIGINS to their public frontend URL(s).
-    CORS_ORIGINS: list[str] = [
+    CORS_ORIGINS: Union[str, list[str]] = [
         "http://localhost:8443",
         "http://127.0.0.1:8443",
         "https://satyadristi.vercel.app",
         "https://satya-dristi.vercel.app",
     ]
 
-    @field_validator("CORS_ORIGINS", mode="before")
+    @field_validator("CORS_ORIGINS", mode="after")
     @classmethod
     def assemble_cors_origins(cls, v: Any) -> list[str]:
         if isinstance(v, str):

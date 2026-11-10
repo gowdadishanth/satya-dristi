@@ -122,15 +122,43 @@ export type Stage = {
 };
 
 export const executionStages: Stage[] = [
-  { name: "Query interpretation", detail: "Parsed intent → bi-temporal change", duration: "0.4s" },
-  { name: "Input validation", detail: "2 images, CRS matched, co-registered", duration: "0.7s" },
-  { name: "Task selection", detail: "Bi-temporal change analysis", duration: "0.2s" },
-  { name: "Specialist tool routing", detail: "Change Understanding · Grounding", duration: "0.3s" },
-  { name: "Model inference", detail: "Change map + region description", duration: "3.1s" },
-  { name: "Evidence fusion", detail: "Overlay reconciliation", duration: "0.9s" },
-  { name: "Confidence estimation", detail: "Cross-model agreement", duration: "0.3s" },
-  { name: "Result generation", detail: "Answer + evidence + trace", duration: "0.5s" },
+  { name: "Query interpretation", detail: "Parsed intent → visual intelligence", duration: "0.4s" },
+  { name: "Input validation", detail: "Optical raster, CRS validated", duration: "0.6s" },
+  { name: "Task selection", detail: "Single-Image Visual Intelligence", duration: "0.2s" },
+  { name: "Specialist tool routing", detail: "VQA & Spatial Grounding Ensemble", duration: "0.3s" },
+  { name: "Model inference", detail: "Feature extraction & classification", duration: "2.8s" },
+  { name: "Evidence fusion", detail: "Bounding box spatial grounding", duration: "0.8s" },
+  { name: "Confidence estimation", detail: "Spectral threshold calibration", duration: "0.3s" },
+  { name: "Result generation", detail: "Answer + evidence + trace", duration: "0.4s" },
 ];
+
+export function getExecutionStages(mode: string = "single"): Stage[] {
+  if (mode === "fusion") {
+    return [
+      { name: "Query interpretation", detail: "Parsed intent → optical + SAR fusion", duration: "0.4s" },
+      { name: "Input validation", detail: "Optical & SAR rasters, co-registered", duration: "0.7s" },
+      { name: "Task selection", detail: "Multimodal complementary analysis", duration: "0.2s" },
+      { name: "Specialist tool routing", detail: "Optical-SAR Specialist Ensemble", duration: "0.3s" },
+      { name: "Model inference", detail: "Cross-modal feature extraction", duration: "3.1s" },
+      { name: "Evidence fusion", detail: "Backscatter + spectral overlay", duration: "0.9s" },
+      { name: "Confidence estimation", detail: "Cross-modal agreement", duration: "0.3s" },
+      { name: "Result generation", detail: "Answer + fused evidence + trace", duration: "0.5s" },
+    ];
+  }
+  if (mode === "temporal") {
+    return [
+      { name: "Query interpretation", detail: "Parsed intent → bi-temporal change", duration: "0.4s" },
+      { name: "Input validation", detail: "2 images, CRS matched, co-registered", duration: "0.7s" },
+      { name: "Task selection", detail: "Bi-temporal change analysis", duration: "0.2s" },
+      { name: "Specialist tool routing", detail: "Change Understanding · Grounding", duration: "0.3s" },
+      { name: "Model inference", detail: "Change map + region description", duration: "3.1s" },
+      { name: "Evidence fusion", detail: "Overlay reconciliation", duration: "0.9s" },
+      { name: "Confidence estimation", detail: "Cross-model agreement", duration: "0.3s" },
+      { name: "Result generation", detail: "Answer + evidence + trace", duration: "0.5s" },
+    ];
+  }
+  return executionStages;
+}
 
 export const domains = [
   { title: "Agriculture", body: "Crop extent, irrigation and seasonal change." },

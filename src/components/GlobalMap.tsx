@@ -71,7 +71,8 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
     if (mode === "single") {
       setSecondaryScene(null);
     }
-  }, [mode]);
+    setErrorMsg(null);
+  }, [mode, year, beforeYear, afterYear, sensor]);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -303,7 +304,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
 
     if (mode === "temporal") {
       try {
-        const [foundBefore, foundAfter] = await Promise.all([
+        const [resBefore, resAfter] = await Promise.allSettled([
           api.earth.searchScenes({
             bbox: targetAoi.bbox,
             year: beforeYear,
@@ -321,6 +322,22 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         ]);
 
         if (reqId && reqId !== aoiRequestIdRef.current) return;
+
+        const foundBefore = resBefore.status === "fulfilled" ? resBefore.value : [];
+        const foundAfter = resAfter.status === "fulfilled" ? resAfter.value : [];
+
+        if (resBefore.status === "rejected" && resAfter.status === "rejected") {
+          const rawMsg = ((resBefore as any).reason?.message || "") + ((resAfter as any).reason?.message || "");
+          if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
+            setErrorMsg("Backend server is warming up. Please wait a moment and click 'Search Satellite Scenes' again.");
+          } else {
+            setErrorMsg("No satellite scenes found for the selected years.");
+          }
+          setBeforeScenes([]);
+          setAfterScenes([]);
+          return;
+        }
+
         setBeforeScenes(foundBefore);
         setAfterScenes(foundAfter);
 
@@ -354,7 +371,12 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         }
       } catch (err: any) {
         if (reqId && reqId !== aoiRequestIdRef.current) return;
-        setErrorMsg(err.message || "No satellite scenes found for the selected years.");
+        const rawMsg = err?.message || "";
+        if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
+          setErrorMsg("Backend server is warming up. Please wait a moment and click 'Search Satellite Scenes' again.");
+        } else {
+          setErrorMsg(err.message || "No satellite scenes found for the selected years.");
+        }
         setBeforeScenes([]);
         setAfterScenes([]);
       } finally {
@@ -367,7 +389,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
 
     if (mode === "fusion") {
       try {
-        const [foundOptical, foundSar] = await Promise.all([
+        const [resOpt, resSar] = await Promise.allSettled([
           api.earth.searchScenes({
             bbox: targetAoi.bbox,
             year: year,
@@ -384,6 +406,22 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         ]);
 
         if (reqId && reqId !== aoiRequestIdRef.current) return;
+
+        const foundOptical = resOpt.status === "fulfilled" ? resOpt.value : [];
+        const foundSar = resSar.status === "fulfilled" ? resSar.value : [];
+
+        if (resOpt.status === "rejected" && resSar.status === "rejected") {
+          const rawMsg = ((resOpt as any).reason?.message || "") + ((resSar as any).reason?.message || "");
+          if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
+            setErrorMsg("Backend server is warming up. Please wait a moment and click 'Search Satellite Scenes' again.");
+          } else {
+            setErrorMsg("No satellite scenes found for the selected area.");
+          }
+          setScenes([]);
+          setSarScenes([]);
+          return;
+        }
+
         setScenes(foundOptical);
         setSarScenes(foundSar);
 
@@ -419,7 +457,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         if (reqId && reqId !== aoiRequestIdRef.current) return;
         const rawMsg = err?.message || "";
         if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
-          setErrorMsg("Backend server is warming up. Please click 'Search Satellite Scenes' again.");
+          setErrorMsg("Backend server is warming up. Please wait a moment and click 'Search Satellite Scenes' again.");
         } else {
           setErrorMsg(err.message || "No satellite scenes found for the selected area.");
         }
@@ -484,6 +522,7 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   };
 
   const handleSearchScenes = async () => {
+    setErrorMsg(null);
     if (aoi) {
       await searchScenesForAoi(aoi);
     } else if (mapRef.current) {
@@ -778,18 +817,28 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       {errorMsg && (
         <div className="mono rounded border border-[color:var(--err)]/30 bg-[color:var(--err)]/8 px-3 py-2 text-[12px] text-[color:var(--err)] flex items-center justify-between gap-2">
           <span>{errorMsg}</span>
-          {(errorMsg.toLowerCase().includes("sign in") ||
-            errorMsg.toLowerCase().includes("session") ||
-            errorMsg.toLowerCase().includes("expired") ||
-            errorMsg.toLowerCase().includes("token")) && (
+          <div className="flex items-center gap-2">
+            {(errorMsg.toLowerCase().includes("sign in") ||
+              errorMsg.toLowerCase().includes("session") ||
+              errorMsg.toLowerCase().includes("expired") ||
+              errorMsg.toLowerCase().includes("token")) && (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent("open-auth-modal"))}
+                className="shrink-0 px-2.5 py-1 rounded bg-[color:var(--err)] text-white text-[11px] font-semibold hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+              >
+                Sign In with Google →
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent("open-auth-modal"))}
-              className="shrink-0 px-2.5 py-1 rounded bg-[color:var(--err)] text-white text-[11px] font-semibold hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+              onClick={() => setErrorMsg(null)}
+              className="rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground cursor-pointer text-[13px] font-bold"
+              title="Dismiss notification"
             >
-              Sign In with Google →
+              ×
             </button>
-          )}
+          </div>
         </div>
       )}
 

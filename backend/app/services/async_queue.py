@@ -186,6 +186,13 @@ class AnalysisJobManager:
                     aoi_bbox=target_bbox, treatment="optical"
                 )
 
+            if (kwargs.get("mode") == "temporal" or task_name == "Bi-Temporal Change") and not before_image_path:
+                target_bbox = aoi_bbox if (aoi_bbox and len(aoi_bbox) == 4) else [78.44, 17.39, 78.49, 17.44]
+                before_image_path, _ = await image_retrieval_service.retrieve_scene_image(
+                    {"scene_id": f"S2A_HISTORICAL_BASELINE_{int(abs(hash(str(target_bbox)))) % 100000}", "bbox": target_bbox, "year": 2018},
+                    aoi_bbox=target_bbox, treatment="optical"
+                )
+
             if (kwargs.get("sar_scene_id") or kwargs.get("mode") == "fusion" or task_name == "Optical + SAR Fusion") and not sar_image_path:
                 sar_id = kwargs.get("sar_scene_id")
                 if not sar_id:

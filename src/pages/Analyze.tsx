@@ -9,7 +9,7 @@ import {
 import { GlobalMap } from "../components/GlobalMap";
 import { isSarScene } from "../lib/geoUtils";
 import { detectQueryIntent, type Mode, type DetectedIntent } from "../lib/intent";
-import { executionStages, type InputType, type TaskType } from "../lib/data";
+import { executionStages, getExecutionStages, type InputType, type TaskType } from "../lib/data";
 import {
   IconOptical, IconSar, IconChange, IconCheck, IconTriangle,
   IconLayers, IconZoomIn, IconZoomOut, IconReset, IconChevron,
@@ -224,11 +224,15 @@ export function Analyze() {
           clearInterval(interval);
           setAnalysisError(status.error || "Remote-sensing model execution failed");
           setPhase("setup");
+          setJobStatus(null);
+          setActiveJobId(null);
         }
       } catch (e: any) {
         clearInterval(interval);
         setAnalysisError(e.message || "Error communicating with analysis queue");
         setPhase("setup");
+        setJobStatus(null);
+        setActiveJobId(null);
       }
     }, 600);
 
@@ -243,6 +247,8 @@ export function Analyze() {
     setAnalysisError(null);
   };
 
+  const currentStages = getExecutionStages(effectiveMode);
+
   // Map backend current_stage to executionStages index
   const getActiveStageIndex = (): number => {
     if (!jobStatus) return 0;
@@ -254,11 +260,11 @@ export function Analyze() {
     if (stage === "evidence_generation") return 4;
     if (stage === "confidence_calculation") return 5;
     if (stage === "report_generation") return 6;
-    if (jobStatus.status === "completed") return executionStages.length;
+    if (jobStatus.status === "completed") return currentStages.length;
     return 0;
   };
 
-  const currentStageIdx = phase === "result" ? executionStages.length : getActiveStageIndex();
+  const currentStageIdx = phase === "result" ? currentStages.length : getActiveStageIndex();
 
   const downloadReport = async () => {
     if (!analysisResult || downloadingPdf) return;
@@ -747,8 +753,8 @@ export function Analyze() {
           </div>
 
           <div className="mt-3 space-y-0">
-            {executionStages.map((s, i) => {
-              const done = phase === "result" || i < currentStageIdx;
+            {currentStages.map((s, i) => {
+              const done = phase === "result" || (phase === "running" && i < currentStageIdx);
               const active = phase === "running" && i === currentStageIdx;
               return (
                 <div key={s.name} className="flex gap-2">
@@ -766,7 +772,7 @@ export function Analyze() {
                     >
                       {done ? <IconCheck className="h-2.5 w-2.5" /> : i + 1}
                     </span>
-                    {i < executionStages.length - 1 && (
+                    {i < currentStages.length - 1 && (
                       <span
                         className={cn("my-0.5 w-px flex-1", done ? "bg-[color:var(--ok)]/40" : "bg-border/60")}
                         style={{ minHeight: 12 }}

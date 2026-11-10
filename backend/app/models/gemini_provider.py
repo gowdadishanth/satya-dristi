@@ -465,10 +465,10 @@ class GeminiProvider(AIProvider):
             temperature=0.1,  # Low temperature for deterministic geospatial precision
         )
 
-        max_retries = 4
-        backoff_delays = [1.5, 2.5, 4.0, 6.0]
+        max_retries = 6
+        backoff_delays = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
         candidate_models = [self._model_name]
-        for fallback in ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.6-flash"]:
+        for fallback in ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash"]:
             if fallback not in candidate_models:
                 candidate_models.append(fallback)
 
