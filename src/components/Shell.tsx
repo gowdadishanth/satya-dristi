@@ -156,9 +156,13 @@ export function Shell({
         <div className="mt-auto p-3 border-t border-border/60">
           <div className="panel p-3">
             <div className="flex items-center gap-2">
-              <StatDot tone={health?.status === "operational" ? "ok" : "warn"} />
+              <StatDot tone={health?.status === "operational" ? "ok" : (health ? "warn" : "warn")} />
               <span className="text-xs font-medium">
-                {health?.status === "operational" ? "Backend operational" : "Connecting…"}
+                {!health
+                  ? "Connecting…"
+                  : health.status === "operational"
+                    ? "Backend operational"
+                    : "Backend active (degraded)"}
               </span>
             </div>
             <div className="mono mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[10.5px] text-muted-foreground">

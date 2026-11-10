@@ -257,6 +257,8 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       const rawMsg = err?.message || "";
       if (rawMsg.includes("Authorization") || rawMsg.includes("UNAUTHORIZED")) {
         setErrorMsg("Session expired or authentication required. Please sign in to query satellite imagery.");
+      } else if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
+        setErrorMsg("Backend server is waking up. Please wait a moment and click 'Search Satellite Scenes'.");
       } else {
         setErrorMsg(rawMsg || "Invalid AOI bounds or AOI validation failed.");
       }
@@ -417,7 +419,12 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
         }
       } catch (err: any) {
         if (reqId && reqId !== aoiRequestIdRef.current) return;
-        setErrorMsg(err.message || "No satellite scenes found for the selected area.");
+        const rawMsg = err?.message || "";
+        if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
+          setErrorMsg("Backend server is warming up. Please click 'Search Satellite Scenes' again.");
+        } else {
+          setErrorMsg(err.message || "No satellite scenes found for the selected area.");
+        }
         setScenes([]);
         setSarScenes([]);
       } finally {
@@ -464,7 +471,12 @@ export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
       }
     } catch (err: any) {
       if (reqId && reqId !== aoiRequestIdRef.current) return;
-      setErrorMsg(err.message || "No scenes found for the selected criteria.");
+      const rawMsg = err?.message || "";
+      if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
+        setErrorMsg("Backend server is warming up. Please click 'Search Satellite Scenes' again.");
+      } else {
+        setErrorMsg(err.message || "No scenes found for the selected criteria.");
+      }
       setScenes([]);
     } finally {
       if (!reqId || reqId === aoiRequestIdRef.current) {

@@ -202,9 +202,13 @@ export function Dashboard({ navigate }: { navigate: (r: Route) => void }) {
             <Eyebrow>System Telemetry</Eyebrow>
             <div className="mt-2 rounded-md border border-border bg-muted/40 p-3">
               <div className="flex items-center gap-2">
-                <StatDot tone={systemHealth?.status === "operational" ? "ok" : "warn"} />
+                <StatDot tone={systemHealth?.status === "operational" ? "ok" : (systemHealth ? "warn" : "warn")} />
                 <span className="text-[12px] font-medium">
-                  {systemHealth?.status === "operational" ? "Backend Operational" : "Connecting..."}
+                  {!systemHealth
+                    ? "Connecting..."
+                    : systemHealth.status === "operational"
+                      ? "Backend Operational"
+                      : "Backend Active (degraded)"}
                 </span>
               </div>
               <dl className="mono mt-2 grid grid-cols-2 gap-y-1 text-[10.5px] text-muted-foreground">
