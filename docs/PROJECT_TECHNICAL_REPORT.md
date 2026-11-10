@@ -373,7 +373,7 @@ The evidence system provides verifiable visual accountability:
 * **Client**: `src/lib/firebase.ts` maintains analyst session in `localStorage` under `sd_auth_token` and `sd_user_profile`.
 * **Backend**: `backend/app/core/firebase.py` extracts Bearer tokens.
   - Production mode: Verifies RSA cryptographic signatures against Google certs via `firebase_admin.auth.verify_id_token`.
-  - Development mode: Decodes developer tokens formatted as `dev-token-<uid>` to enable instant local testing.
+  - All environments verify Firebase ID tokens and reject synthetic developer tokens.
 * **Multi-Tenancy**: All database queries are filtered by user UID.
 
 ---

@@ -84,7 +84,7 @@ python -m venv .venv
 # Install dependencies
 pip install -r requirements.txt
 
-# (Optional) Configure environment variables in backend/.env
+# Configure environment variables in backend/.env
 cp .env.example .env
 
 # Run automated test suite
@@ -95,7 +95,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 The backend documentation will be accessible at:
-- Swagger UI: `http://127.0.0.1:8000/docs`
+- Swagger UI: `http://127.0.0.1:8000/api/v1/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
 ### 2. Frontend Setup
@@ -109,6 +109,15 @@ npm run dev
 ```
 
 Open `http://localhost:8443` in your browser.
+
+### Production configuration
+
+For a real public deployment, configure the following values in your hosting provider rather than committing them:
+
+- Frontend: the `VITE_FIREBASE_*` values from your Firebase web application and `VITE_API_BASE_URL` set to the deployed backend URL.
+- Backend: `GEMINI_API_KEY`, Firebase Admin credentials (`FIREBASE_CREDENTIALS_JSON` or `GOOGLE_APPLICATION_CREDENTIALS`), and `CORS_ORIGINS` set to the exact deployed frontend URL.
+
+Firebase Authentication must be enabled for Google sign-in. The app rejects synthetic development tokens in every environment.
 
 ---
 
@@ -131,7 +140,7 @@ backend\.venv\Scripts\python.exe backend/verify_temporal_and_fusion.py
 
 ## 🔒 Security & Persistence
 
-- **Firebase Authentication**: Client passes Firebase ID tokens via `Authorization: Bearer <token>`. In development, dev tokens (`dev-token-<uid>`) are accepted for local offline development.
+- **Firebase Authentication**: Client passes Firebase ID tokens via `Authorization: Bearer <token>`. Synthetic development tokens are intentionally rejected; configure Firebase for any authenticated local or production use.
 - **Firestore Integration**: User records, analysis sessions, reports, and evidence references are saved in Firestore (with automatic local SQLite/JSON document store fallback for offline/air-gapped setups).
 - **Multi-Tenant Isolation**: Analyses and reports are strictly scoped to the authenticated UID.
 

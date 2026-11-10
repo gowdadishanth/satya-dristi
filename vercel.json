@@ -1,10 +1,19 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm run build",
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/((?!api/).*)",
+      "source": "/api/:path*",
+      "destination": "https://satya-dristi-backend.onrender.com/api/:path*"
+    },
+    {
+      "source": "/static/:path*",
+      "destination": "https://satya-dristi-backend.onrender.com/static/:path*"
+    },
+    {
+      "source": "/((?!api/|static/).*)",
       "destination": "/index.html"
     }
   ]

@@ -7,6 +7,7 @@ import {
   IconReset, IconGlobe
 } from "./icons";
 import { api, type Scene, type AOIPreview } from "../lib/api";
+import { isSarScene } from "../lib/geoUtils";
 
 type GlobalMapProps = {
   onSelectSceneAndAOI: (scene: Scene, aoi: AOIPreview, secondScene?: Scene) => void;
@@ -21,8 +22,6 @@ const PRESETS = [
   { name: "San Francisco", fullName: "San Francisco Bay", lat: 37.774, lon: -122.419, zoom: 11 },
   { name: "Rotterdam", fullName: "Rotterdam Port", lat: 51.924, lon: 4.477, zoom: 12 },
 ];
-
-import { isSarScene } from "../lib/geoUtils";
 
 export function GlobalMap({ onSelectSceneAndAOI, mode }: GlobalMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);

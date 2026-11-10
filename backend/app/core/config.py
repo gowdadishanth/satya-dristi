@@ -15,7 +15,14 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     # CORS
-    CORS_ORIGINS: list[str] = ["*"]
+    # Explicit local development origins are safe defaults. Production deployments
+    # must set CORS_ORIGINS to their public frontend URL(s).
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:8443",
+        "http://127.0.0.1:8443",
+        "https://satyadristi.vercel.app",
+        "https://satya-dristi.vercel.app",
+    ]
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -31,7 +38,12 @@ class Settings(BaseSettings):
             return [x.strip() for x in v.split(",") if x.strip()]
         elif isinstance(v, (list, tuple)):
             return [str(x) for x in v]
-        return ["*"]
+        return [
+            "http://localhost:8443",
+            "http://127.0.0.1:8443",
+            "https://satyadristi.vercel.app",
+            "https://satya-dristi.vercel.app",
+        ]
     
     # Storage Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent

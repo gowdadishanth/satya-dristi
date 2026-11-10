@@ -143,14 +143,10 @@ sequenceDiagram
     participant FB as Firebase Admin / Local DB
 
     Analyst->>Client: Click "Sign in with Google" or Launch App
-    Client->>Client: Load or generate session token (dev-token-<uid>)
+    Client->>Client: Obtain Firebase ID token after Google sign-in
     Client->>API: GET /api/v1/auth/me (Authorization: Bearer <TOKEN>)
     API->>FB: Verify token with Firebase Admin SDK
-    alt In Development Mode & dev-token
-        FB-->>API: Decode local analyst claims (uid, name, email)
-    else Live Firebase Token
-        FB-->>API: Verify RSA signature against Google public certs
-    end
+    FB-->>API: Verify RSA signature against Google public certs
     API->>FB: Save / update user in Firestore or SQLite
     API-->>Client: 200 OK (UserProfile JSON)
     Client-->>Analyst: Authenticated state rendered in UI Shell
@@ -416,12 +412,12 @@ erDiagram
 
 ### 5.1 Authentication and Identity Verification
 * **Production**: The application verifies cryptographically signed JWT ID tokens issued by Firebase Authentication using the Google public keys through `firebase_admin.auth.verify_id_token`.
-* **Development Isolation**: When `ENVIRONMENT="development"`, local development tokens (`dev-token-<uid>`) bypass RSA signature checks to allow offline developer testing and evaluation without active GCP credentials.
+* **Development Authentication**: The backend verifies Firebase ID tokens in every environment and rejects synthetic tokens. For local testing, use Firebase Emulator-issued tokens or a real Firebase project.
 * **User Data Scoping**: All database queries for analyses and reports filter on the verified `uid`, preventing unauthorized cross-user data access.
 
 ### 5.2 File and Upload Security
 * **Filename Sanitization**: Uploaded files are cleaned using `pathlib.Path(filename).name` to prevent directory traversal (`../`) attacks.
-* **Size Limits**: Form data uploads enforce a 100MB ceiling.
+* **Size Limits**: Form data uploads enforce a 150 MB ceiling per file and 300 MB per request.
 * **Storage Segregation**: User uploads are segregated in `data/uploads/`, system cache in `data/cache/`, generated evidence in `data/evidence/`, and reports in `data/reports/`.
 * **GeoJSON Bounds Checks**: All user AOI inputs are strictly validated against WGS84 range limits ($[-180, 180]$ longitude, $[-90, 90]$ latitude).
 

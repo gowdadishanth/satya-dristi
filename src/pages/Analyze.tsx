@@ -528,7 +528,7 @@ export function Analyze() {
                       />
                     ))}
                     <p className="mono text-[10.5px] text-muted-foreground">
-                      GeoTIFF (.tif), TIFF, PNG, or JPEG up to 100MB.
+                      GeoTIFF (.tif), TIFF, PNG, or JPEG up to 150MB per file.
                     </p>
                   </div>
                 )}

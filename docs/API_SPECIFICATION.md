@@ -14,8 +14,8 @@
 ```http
 Authorization: Bearer <FIREBASE_ID_TOKEN>
 ```
-* In production, the token is verified using `firebase_admin.auth.verify_id_token`.
-* In development mode (`ENVIRONMENT=development`), tokens formatted as `dev-token-<uid>` or `test-token-<uid>` are automatically decoded to allow seamless local testing and analyst workflows.
+* Firebase ID tokens are verified using `firebase_admin.auth.verify_id_token` in every environment.
+* Synthetic development, test, guest, and malformed tokens are rejected. Local testing should use a Firebase Emulator-issued token or a real Firebase project token.
 
 ---
 
@@ -274,7 +274,7 @@ Authorization: Bearer <FIREBASE_ID_TOKEN>
 ### 3.5 System & Hardware Telemetry
 
 #### `GET /api/v1/system/health`
-* **Purpose**: Non-invasive live hardware telemetry querying PyTorch CUDA and psutil.
+* **Purpose**: Non-invasive live hardware telemetry, storage mode, Gemini configuration state, and cached lightweight reachability checks for the public STAC catalogues. It does not invoke billable Gemini inference.
 * **Authentication**: None
 * **Response (200 OK)**:
 ```json
@@ -292,17 +292,17 @@ Authorization: Bearer <FIREBASE_ID_TOKEN>
   "ram_available_mb": 6420.5,
   "active_jobs_count": 0,
   "models_status": {
-    "vqa_engine": "online",
-    "grounding_engine": "online",
-    "bi_temporal_change_engine": "online",
-    "optical_sar_fusion_engine": "online"
+    "vqa_engine": "configured",
+    "grounding_engine": "configured",
+    "bi_temporal_change_engine": "configured",
+    "optical_sar_fusion_engine": "configured"
   },
   "providers": {
-    "copernicus_data_space_stac": "online",
-    "aws_earth_search_stac": "online",
-    "esri_world_imagery": "online"
+    "copernicus_data_space_stac": "reachable",
+    "aws_earth_search_stac": "reachable",
+    "gemini": "configured"
   },
-  "database_status": "connected"
+  "database_status": "firestore"
 }
 ```
 

@@ -13,6 +13,7 @@ import { StatDot, cn } from "./ui";
 import type { Route } from "../App";
 import { api, type SystemHealth } from "../lib/api";
 import { authService, type UserProfile } from "../lib/firebase";
+import { AuthModal, GoogleIcon } from "./AuthModal";
 
 const nav: { key: Route; label: string; icon: (p: any) => ReactNode }[] = [
   { key: "dashboard", label: "Dashboard", icon: IconDashboard },
@@ -48,8 +49,6 @@ export function Brand({ onClick, small }: { onClick?: () => void; small?: boolea
     </button>
   );
 }
-
-import { AuthModal, GoogleIcon } from "./AuthModal";
 
 export function Shell({
   route,
