@@ -16,6 +16,7 @@ import {
   IconTrace, IconDownload, IconGlobe, IconUpload, IconFile,
 } from "../components/icons";
 import { api, getAnalysisImageUrl, type Scene, type AOIPreview, type AnalysisRecord, type AnalysisJobStatus } from "../lib/api";
+import { authService } from "../lib/firebase";
 
 type LayerKey = "optical" | "sar" | "change" | "grounding" | "grid";
 const REGION = REGIONS.urbanWater;
@@ -72,7 +73,10 @@ function formatErrorMessage(raw: string): string {
   if (raw.includes("429") || raw.toLowerCase().includes("quota") || raw.toLowerCase().includes("rate limit")) {
     return "Gemini API rate limit reached. Please wait a few seconds and click Retry Analysis.";
   }
-  if (raw.includes("401") || raw.toLowerCase().includes("unauthorized") || raw.toLowerCase().includes("api key")) {
+  if (raw.includes("401") || raw.toLowerCase().includes("unauthorized") || raw.toLowerCase().includes("authorization") || raw.toLowerCase().includes("credentials")) {
+    return "Please sign in with Google to authenticate and run satellite analysis.";
+  }
+  if (raw.includes("api key") || raw.toLowerCase().includes("gemini_api_key")) {
     return "Invalid or unauthorized Gemini API key. Please check your GEMINI_API_KEY in backend/.env.";
   }
   if (raw.toLowerCase().includes("failed to fetch") || raw.toLowerCase().includes("networkerror") || raw.toLowerCase().includes("unable to connect")) {
@@ -156,6 +160,15 @@ export function Analyze() {
   // Launch Real Asynchronous Analysis
   const run = async () => {
     if (!hasImagery || anyInvalid || !query.trim() || phase === "running") return;
+
+    // Check if user is signed in
+    const user = authService.getCurrentUser();
+    const token = typeof window !== "undefined" ? localStorage.getItem("sd_auth_token") : null;
+    if (!user && !token) {
+      window.dispatchEvent(new CustomEvent("open-auth-modal"));
+      setAnalysisError("Please sign in with Google to authenticate and run satellite analysis.");
+      return;
+    }
 
     setPhase("running");
     setAnalysisError(null);
@@ -628,7 +641,16 @@ export function Analyze() {
                 {formatErrorMessage(analysisError)}
               </p>
             </div>
-            <div className="flex justify-end pt-1">
+            <div className="flex items-center justify-end gap-2 pt-1">
+              {(analysisError.toLowerCase().includes("sign in") || analysisError.toLowerCase().includes("credential") || analysisError.toLowerCase().includes("authoriz")) && (
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent("open-auth-modal"))}
+                  className="px-2.5 py-1 rounded bg-[#4dbe55] text-[#081a0c] text-[11px] font-bold hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+                >
+                  Sign in with Google ↗
+                </button>
+              )}
               <button
                 type="button"
                 onClick={run}
