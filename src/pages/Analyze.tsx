@@ -75,6 +75,9 @@ function formatErrorMessage(raw: string): string {
   if (raw.includes("401") || raw.toLowerCase().includes("unauthorized") || raw.toLowerCase().includes("api key")) {
     return "Invalid or unauthorized Gemini API key. Please check your GEMINI_API_KEY in backend/.env.";
   }
+  if (raw.toLowerCase().includes("failed to fetch") || raw.toLowerCase().includes("networkerror") || raw.toLowerCase().includes("unable to connect")) {
+    return "Connecting to Earth Observation server. The backend was idle and is warming up—please click Retry Analysis.";
+  }
   const match = raw.match(/'message':\s*['"]([^'"]+)['"]/);
   if (match && match[1]) {
     return match[1];

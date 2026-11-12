@@ -48,10 +48,22 @@ async function request<T>(endpoint: string, options: RequestInit = {}, retryCoun
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (networkErr: any) {
+    // If backend is waking up or network blipped, automatically retry up to 2 times
+    if (retryCount < 2) {
+      const waitMs = (retryCount + 1) * 1500;
+      console.warn(`[Satya Dristi API] Connection attempt ${retryCount + 1} to ${endpoint} failed. Retrying in ${waitMs}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      return request<T>(endpoint, options, retryCount + 1);
+    }
+    throw new Error("Unable to connect to the Earth Observation backend. The server is initializing—please retry in a moment.");
+  }
 
   // Automatically refresh and retry once if 401 Unauthorized occurs
   if (res.status === 401 && retryCount === 0) {
